@@ -52,7 +52,6 @@ cmake --build build-vst3
 ```
 
 The SDK is optional and is not downloaded automatically. Its license and usage notes are available in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
-```
 
 The application must run inside a logged-in desktop/user session with PipeWire available. By default it asks PipeWire to connect to the default microphone. To target a specific PipeWire node:
 

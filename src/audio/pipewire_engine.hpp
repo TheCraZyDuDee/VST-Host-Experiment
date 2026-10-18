@@ -5,6 +5,8 @@
 
 namespace vst_host::audio {
 
+class Vst3Processor;
+
 struct PipeWireOptions {
     // Optional PipeWire node id/name for the microphone. If empty, the default
     // source is selected through PipeWire's autoconnect behavior.
@@ -26,6 +28,8 @@ public:
 
     // Blocks until SIGINT/SIGTERM or an internal setup failure.
     int run();
+    void request_stop() noexcept;
+    [[nodiscard]] Vst3Processor* plugin_processor() const noexcept;
 
 private:
     struct Impl;

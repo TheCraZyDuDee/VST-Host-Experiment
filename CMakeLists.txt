@@ -21,6 +21,14 @@ if(VST_HOST_ENABLE_VST3 OR VST3_SDK_ROOT)
         message(FATAL_ERROR "VST3 hosting requires CMake 3.25 or newer. Upgrade CMake or disable VST3 hosting.")
     endif()
 
+    # Steinberg's SDK requires DEVELOPMENT, RELEASE, _DEBUG, or NDEBUG.
+    # Single-config generators (such as Unix Makefiles) otherwise default to
+    # an empty build type, so choose Release unless the user specified one.
+    if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+        message(STATUS "No build type specified; defaulting to Release for VST3 SDK compatibility.")
+    endif()
+
     if(VST3_SDK_ROOT)
         if(NOT EXISTS "${VST3_SDK_ROOT}/CMakeLists.txt")
             message(FATAL_ERROR "VST3_SDK_ROOT must point to the root of the Steinberg vst3sdk checkout.")

@@ -205,7 +205,12 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
 
     width = size.right - size.left;
     height = size.bottom - size.top;
-    return width > 0 && height > 0;
+    if (width <= 0 || height <= 0) {
+        error = "The VST3 editor reported an invalid size.";
+        close_editor();
+        return false;
+    }
+    return true;
 #endif
 }
 

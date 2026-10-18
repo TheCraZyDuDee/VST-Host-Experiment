@@ -119,6 +119,8 @@ struct Vst3Processor::Impl {
     Steinberg::Vst::ProcessContext process_context{};
     float* input_channels[2]{};
     float* output_channels[2]{};
+    Steinberg::int32 input_channel_count{2};
+    Steinberg::int32 output_channel_count{2};
     std::vector<float> input_left;
     std::vector<float> input_right;
     std::vector<float> output_left;
@@ -471,10 +473,10 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
     impl_->process_context.state = Steinberg::Vst::ProcessContext::kPlaying;
 
     impl_->input_bus = {};
-    impl_->input_bus.numChannels = 2;
+    impl_->input_bus.numChannels = impl_->input_channel_count;
     impl_->input_bus.channelBuffers32 = impl_->input_channels;
     impl_->output_bus = {};
-    impl_->output_bus.numChannels = 2;
+    impl_->output_bus.numChannels = impl_->output_channel_count;
     impl_->output_bus.channelBuffers32 = impl_->output_channels;
 
     impl_->process_data = {};
@@ -523,11 +525,15 @@ void Vst3Processor::process(float* samples, std::size_t frames) noexcept {
     while (offset < frames) {
         const auto block_frames = std::min(capacity, frames - offset);
         for (std::size_t i = 0; i < block_frames; ++i) {
-            impl_->input_left[i] = samples[(offset + i) * 2];
-            impl_->input_right[i] = samples[(offset + i) * 2 + 1];
+            const float left = samples[(offset + i) * 2];
+            const float right = samples[(offset + i) * 2 + 1];
+            impl_->input_left[i] = impl_->input_channel_count == 1
+                ? 0.5F * (left + right) : left;
+            impl_->input_right[i] = right;
             // If a plug-in reports a processing failure, preserve dry audio.
             impl_->output_left[i] = impl_->input_left[i];
-            impl_->output_right[i] = impl_->input_right[i];
+            impl_->output_right[i] = impl_->output_channel_count == 1
+                ? impl_->input_left[i] : impl_->input_right[i];
         }
 
         impl_->process_data.numSamples = static_cast<Steinberg::int32>(block_frames);
@@ -549,7 +555,8 @@ void Vst3Processor::process(float* samples, std::size_t frames) noexcept {
 
         for (std::size_t i = 0; i < block_frames; ++i) {
             samples[(offset + i) * 2] = impl_->output_left[i];
-            samples[(offset + i) * 2 + 1] = impl_->output_right[i];
+            samples[(offset + i) * 2 + 1] = impl_->output_channel_count == 1
+                ? impl_->output_left[i] : impl_->output_right[i];
         }
         offset += block_frames;
         impl_->project_time_samples += static_cast<std::int64_t>(block_frames);

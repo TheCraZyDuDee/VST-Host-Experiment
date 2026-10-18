@@ -106,6 +106,23 @@ private:
         message.xclient.data.l[3] = static_cast<long>(window_);
         message.xclient.data.l[4] = embedVersion_;
         XSendEvent(display_, child, False, NoEventMask, &message);
+        sendXEmbedMessage(child, 1); // XEMBED_WINDOW_ACTIVATE
+        sendXEmbedMessage(child, 4); // XEMBED_FOCUS_IN
+    }
+
+    void sendXEmbedMessage(Window child, long opcode) {
+        XEvent message{};
+        message.xclient.type = ClientMessage;
+        message.xclient.display = display_;
+        message.xclient.window = child;
+        message.xclient.message_type = xembedAtom_;
+        message.xclient.format = 32;
+        message.xclient.data.l[0] = CurrentTime;
+        message.xclient.data.l[1] = opcode;
+        message.xclient.data.l[2] = 0;
+        message.xclient.data.l[3] = static_cast<long>(window_);
+        message.xclient.data.l[4] = embedVersion_;
+        XSendEvent(display_, child, False, NoEventMask, &message);
     }
 
     void pumpEvents() {
@@ -159,6 +176,12 @@ private:
                 XConfigureWindow(display_, request.window, request.value_mask, &changes);
                 break;
             }
+            case FocusIn:
+                for (const auto child : children_) sendXEmbedMessage(child, 1);
+                break;
+            case FocusOut:
+                for (const auto child : children_) sendXEmbedMessage(child, 2);
+                break;
             case DestroyNotify:
                 children_.erase(std::remove(children_.begin(), children_.end(),
                                             event.xdestroywindow.window), children_.end());

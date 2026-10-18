@@ -2,7 +2,6 @@
 
 #include "stereo_ring_buffer.hpp"
 
-#include <pipewire/filter.h>
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
 
@@ -17,13 +16,14 @@ namespace {
 
 constexpr std::uint32_t sample_rate = 48000;
 constexpr std::uint32_t channel_count = 2;
+constexpr std::size_t frame_bytes = sizeof(float) * channel_count;
 
 struct EngineState {
     pw_main_loop* loop{};
+    pw_context* context{};
+    pw_core* core{};
     pw_stream* capture_stream{};
-    pw_filter* source_filter{};
-    void* left_port{};
-    void* right_port{};
+    pw_stream* source_stream{};
     StereoRingBuffer ring;
     float gain{1.0F};
     bool bypass{false};
@@ -52,7 +52,9 @@ void on_capture_process(void* userdata) {
         const auto sample_count = static_cast<std::size_t>(data.chunk->size) /
                                   sizeof(float);
         const auto frames = sample_count / channel_count;
-        state->ring.push_interleaved(static_cast<const float*>(data.data), frames);
+        const auto* samples = reinterpret_cast<const float*>(
+            static_cast<const std::uint8_t*>(data.data) + data.chunk->offset);
+        state->ring.push_interleaved(samples, frames);
     }
 
     pw_stream_queue_buffer(state->capture_stream, buffer);
@@ -71,32 +73,41 @@ void on_capture_state_changed(void* userdata, pw_stream_state, pw_stream_state s
     }
 }
 
-void on_source_process(void* userdata, spa_io_position* position) {
+void on_source_process(void* userdata) {
     auto* state = static_cast<EngineState*>(userdata);
-    const auto frames = static_cast<std::size_t>(position->clock.duration);
-
-    auto* left = static_cast<float*>(pw_filter_get_dsp_buffer(
-        state->left_port, static_cast<std::uint32_t>(frames)));
-    auto* right = static_cast<float*>(pw_filter_get_dsp_buffer(
-        state->right_port, static_cast<std::uint32_t>(frames)));
-    if (left == nullptr || right == nullptr) {
+    auto* buffer = pw_stream_dequeue_buffer(state->source_stream);
+    if (buffer == nullptr) {
         return;
     }
 
-    state->ring.pop_planar(left, right, frames);
-    if (!state->bypass && state->gain != 1.0F) {
-        for (std::size_t i = 0; i < frames; ++i) {
-            left[i] *= state->gain;
-            right[i] *= state->gain;
+    auto* spa_buffer = buffer->buffer;
+    if (spa_buffer != nullptr && spa_buffer->n_datas > 0 &&
+        spa_buffer->datas[0].data != nullptr &&
+        spa_buffer->datas[0].chunk != nullptr) {
+        auto& data = spa_buffer->datas[0];
+        const auto frames = static_cast<std::size_t>(data.maxsize) / frame_bytes;
+        auto* samples = reinterpret_cast<float*>(data.data);
+
+        state->ring.pop_interleaved(samples, frames);
+        if (!state->bypass && state->gain != 1.0F) {
+            for (std::size_t i = 0; i < frames * channel_count; ++i) {
+                samples[i] *= state->gain;
+            }
         }
+
+        data.chunk->offset = 0;
+        data.chunk->stride = static_cast<int32_t>(frame_bytes);
+        data.chunk->size = static_cast<std::uint32_t>(frames * frame_bytes);
     }
+
+    pw_stream_queue_buffer(state->source_stream, buffer);
 }
 
-void on_source_state_changed(void* userdata, pw_filter_state, pw_filter_state state,
+void on_source_state_changed(void* userdata, pw_stream_state, pw_stream_state state,
                              const char* error) {
     auto* data = static_cast<EngineState*>(userdata);
-    if (state == PW_FILTER_STATE_ERROR) {
-        std::fprintf(stderr, "PipeWire virtual source error: %s\n",
+    if (state == PW_STREAM_STATE_ERROR) {
+        std::fprintf(stderr, "PipeWire virtual microphone error: %s\n",
                      error != nullptr ? error : "unknown error");
         data->setup_error = -EIO;
         if (data->loop != nullptr) {
@@ -113,9 +124,9 @@ const pw_stream_events capture_events = [] {
     return events;
 }();
 
-const pw_filter_events source_events = [] {
-    pw_filter_events events{};
-    events.version = PW_VERSION_FILTER_EVENTS;
+const pw_stream_events source_events = [] {
+    pw_stream_events events{};
+    events.version = PW_VERSION_STREAM_EVENTS;
     events.state_changed = on_source_state_changed;
     events.process = on_source_process;
     return events;
@@ -133,14 +144,17 @@ struct PipeWireEngine::Impl {
     PipeWireOptions options;
     EngineState state;
     spa_hook capture_listener{};
+    spa_hook source_listener{};
     bool initialized{false};
 
-    int create_source() {
+    int create_source_stream() {
         auto* properties = pw_properties_new(
             PW_KEY_MEDIA_TYPE, "Audio",
             PW_KEY_MEDIA_CATEGORY, "Source",
             PW_KEY_MEDIA_ROLE, "Communication",
-            PW_KEY_MEDIA_CLASS, "Audio/Source/Virtual",
+            // A pw_stream producing audio is the native PipeWire source API.
+            // Unlike a pw_filter, it is exported as a capture source to clients.
+            PW_KEY_MEDIA_CLASS, "Audio/Source",
             PW_KEY_NODE_NAME, options.output_name.c_str(),
             PW_KEY_NODE_DESCRIPTION, options.output_description.c_str(),
             PW_KEY_AUDIO_CHANNELS, "2",
@@ -150,42 +164,36 @@ struct PipeWireEngine::Impl {
             return -ENOMEM;
         }
 
-        state.source_filter = pw_filter_new_simple(
-            pw_main_loop_get_loop(state.loop),
-            options.output_name.c_str(),
-            properties,
-            &source_events,
-            &state);
-
-        if (state.source_filter == nullptr) {
-            std::fprintf(stderr, "Could not create PipeWire virtual source.\n");
+        state.source_stream = pw_stream_new(
+            state.core, options.output_name.c_str(), properties);
+        if (state.source_stream == nullptr) {
+            std::fprintf(stderr, "Could not create PipeWire virtual microphone stream.\n");
             return -ENOMEM;
         }
 
-        state.left_port = pw_filter_add_port(
-            state.source_filter, PW_DIRECTION_OUTPUT,
-            PW_FILTER_PORT_FLAG_MAP_BUFFERS, sizeof(void*),
-            pw_properties_new(PW_KEY_FORMAT_DSP, "32 bit float mono audio",
-                              PW_KEY_PORT_NAME, "front-left",
-                              PW_KEY_AUDIO_CHANNEL, "FL", nullptr),
-            nullptr, 0);
-        state.right_port = pw_filter_add_port(
-            state.source_filter, PW_DIRECTION_OUTPUT,
-            PW_FILTER_PORT_FLAG_MAP_BUFFERS, sizeof(void*),
-            pw_properties_new(PW_KEY_FORMAT_DSP, "32 bit float mono audio",
-                              PW_KEY_PORT_NAME, "front-right",
-                              PW_KEY_AUDIO_CHANNEL, "FR", nullptr),
-            nullptr, 0);
+        pw_stream_add_listener(state.source_stream, &source_listener,
+                               &source_events, &state);
 
-        if (state.left_port == nullptr || state.right_port == nullptr) {
-            std::fprintf(stderr, "Could not create virtual source audio ports.\n");
-            return -ENOMEM;
-        }
+        std::uint8_t pod_buffer[1024];
+        spa_pod_builder builder = SPA_POD_BUILDER_INIT(pod_buffer, sizeof(pod_buffer));
+        spa_audio_info_raw format{};
+        format.format = SPA_AUDIO_FORMAT_F32;
+        format.channels = channel_count;
+        format.rate = sample_rate;
+        format.position[0] = SPA_AUDIO_CHANNEL_FL;
+        format.position[1] = SPA_AUDIO_CHANNEL_FR;
+        const spa_pod* params[1];
+        params[0] = spa_format_audio_raw_build(&builder, SPA_PARAM_EnumFormat, &format);
 
-        if (pw_filter_connect(state.source_filter, PW_FILTER_FLAG_RT_PROCESS,
-                              nullptr, 0) < 0) {
-            std::fprintf(stderr, "Could not connect the virtual source to PipeWire.\n");
-            return -EIO;
+        const auto connect_result = pw_stream_connect(
+            state.source_stream, PW_DIRECTION_OUTPUT, PW_ID_ANY,
+            static_cast<pw_stream_flags>(PW_STREAM_FLAG_MAP_BUFFERS |
+                                         PW_STREAM_FLAG_RT_PROCESS),
+            params, 1);
+        if (connect_result < 0) {
+            std::fprintf(stderr, "Could not publish virtual microphone: %s\n",
+                         std::strerror(-connect_result));
+            return connect_result;
         }
         return 0;
     }
@@ -206,9 +214,7 @@ struct PipeWireEngine::Impl {
         }
 
         state.capture_stream = pw_stream_new(
-            pw_filter_get_core(state.source_filter),
-            "vst-host-capture",
-            properties);
+            state.core, "vst-host-capture", properties);
         if (state.capture_stream == nullptr) {
             std::fprintf(stderr, "Could not create PipeWire capture stream.\n");
             return -ENOMEM;
@@ -216,12 +222,12 @@ struct PipeWireEngine::Impl {
 
         std::uint8_t pod_buffer[1024];
         spa_pod_builder builder = SPA_POD_BUILDER_INIT(pod_buffer, sizeof(pod_buffer));
-        // Assign fields explicitly: SPA_AUDIO_INFO_RAW_INIT uses designated
-        // initializers whose declaration order differs across SPA header versions.
         spa_audio_info_raw format{};
         format.format = SPA_AUDIO_FORMAT_F32;
         format.channels = channel_count;
         format.rate = sample_rate;
+        format.position[0] = SPA_AUDIO_CHANNEL_FL;
+        format.position[1] = SPA_AUDIO_CHANNEL_FR;
         const spa_pod* params[1];
         params[0] = spa_format_audio_raw_build(&builder, SPA_PARAM_EnumFormat, &format);
 
@@ -253,8 +259,14 @@ PipeWireEngine::~PipeWireEngine() {
     if (impl_->state.capture_stream != nullptr) {
         pw_stream_destroy(impl_->state.capture_stream);
     }
-    if (impl_->state.source_filter != nullptr) {
-        pw_filter_destroy(impl_->state.source_filter);
+    if (impl_->state.source_stream != nullptr) {
+        pw_stream_destroy(impl_->state.source_stream);
+    }
+    if (impl_->state.core != nullptr) {
+        pw_core_disconnect(impl_->state.core);
+    }
+    if (impl_->state.context != nullptr) {
+        pw_context_destroy(impl_->state.context);
     }
     if (impl_->state.loop != nullptr) {
         pw_main_loop_destroy(impl_->state.loop);
@@ -278,12 +290,24 @@ int PipeWireEngine::run() {
         return -ENOMEM;
     }
 
+    impl_->state.context = pw_context_new(
+        pw_main_loop_get_loop(impl_->state.loop), nullptr, 0);
+    if (impl_->state.context == nullptr) {
+        std::fprintf(stderr, "Could not create PipeWire context.\n");
+        return -ENOMEM;
+    }
+    impl_->state.core = pw_context_connect(impl_->state.context, nullptr, 0);
+    if (impl_->state.core == nullptr) {
+        std::fprintf(stderr, "Could not connect to PipeWire.\n");
+        return -EIO;
+    }
+
     pw_loop_add_signal(pw_main_loop_get_loop(impl_->state.loop), SIGINT,
                        request_shutdown, &impl_->state);
     pw_loop_add_signal(pw_main_loop_get_loop(impl_->state.loop), SIGTERM,
                        request_shutdown, &impl_->state);
 
-    auto result = impl_->create_source();
+    auto result = impl_->create_source_stream();
     if (result == 0) {
         result = impl_->create_capture_stream();
     }

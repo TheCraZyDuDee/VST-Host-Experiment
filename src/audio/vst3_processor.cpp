@@ -1,5 +1,7 @@
 #include "vst3_processor.hpp"
 
+#include <utility>
+
 #if defined(VST_HOST_ENABLE_VST3)
 
 #include "public.sdk/source/vst/hosting/hostclasses.h"
@@ -13,7 +15,6 @@
 #include <atomic>
 #include <cstring>
 #include <memory>
-#include <utility>
 #include <vector>
 
 namespace Steinberg {

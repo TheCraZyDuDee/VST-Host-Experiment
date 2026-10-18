@@ -237,7 +237,11 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
     impl_->editor_view = Steinberg::owned(
         impl_->editor_controller->createView(Steinberg::Vst::ViewType::kEditor));
     if (!impl_->editor_view) {
-        error = "The VST3 plug-in does not provide an editor view.";
+        const auto parameter_count = impl_->editor_controller->getParameterCount();
+        error = "The VST3 edit controller returned no editor view from createView(\"editor\"). "
+                "The controller reports " + std::to_string(parameter_count) +
+                " parameters. This is distinct from an unsupported X11 editor: the host has not "
+                "received a view yet.";
         impl_->editor_controller->setComponentHandler(nullptr);
         impl_->editor_handler.reset();
         impl_->editor_controller = nullptr;

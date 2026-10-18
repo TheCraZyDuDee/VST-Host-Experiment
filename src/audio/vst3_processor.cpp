@@ -265,14 +265,11 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
         return false;
     }
 
+    // Some plug-ins do not accept the component's serialized state in their
+    // edit controller even though they can still create a usable editor. Treat
+    // state synchronization as best-effort and attempt createView regardless.
     const auto sync_result = impl_->editor_controller->setComponentState(&component_state);
-    if (sync_result != Steinberg::kResultTrue) {
-        error = "The VST3 edit controller rejected the component state before editor creation.";
-        impl_->editor_controller->setComponentHandler(nullptr);
-        impl_->editor_handler.reset();
-        impl_->editor_controller = nullptr;
-        return false;
-    }
+    const bool component_state_accepted = sync_result == Steinberg::kResultTrue;
 
     impl_->editor_view = Steinberg::owned(
         impl_->editor_controller->createView(Steinberg::Vst::ViewType::kEditor));
@@ -280,7 +277,9 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
         const auto parameter_count = impl_->editor_controller->getParameterCount();
         error = "The VST3 edit controller returned no editor view from createView(\"editor\"). "
                 "The controller reports " + std::to_string(parameter_count) +
-                " parameters. This is distinct from an unsupported X11 editor: the host has not "
+                " parameters. Component state synchronization was " +
+                (component_state_accepted ? std::string("accepted") : std::string("rejected")) +
+                ". This is distinct from an unsupported X11 editor: the host has not "
                 "received a view yet.";
         impl_->editor_controller->setComponentHandler(nullptr);
         impl_->editor_handler.reset();

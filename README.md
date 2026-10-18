@@ -49,7 +49,7 @@ The application must run inside a logged-in desktop/user session with PipeWire a
 ./build/vst-host --input NODE_ID_OR_NAME --name vst-host-mic --gain 1.0
 ```
 
-Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. Gain is currently set at startup, not changed interactively. Stop with Ctrl+C.
+Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. `--latency-frames 256` requests a 256-frame PipeWire interval (about 5.33 ms at 48 kHz); try `128` for lower latency or `512`/`1024` if you hear dropouts. This is a request, not a guarantee: actual latency depends on the PipeWire graph and the receiving application. The host also discards stale queued audio if the virtual microphone was suspended, rather than replaying a large backlog. Gain and latency are set at startup, not changed interactively. Stop with Ctrl+C.
 
 The output source is intended to appear in applications' microphone/input-device lists as **VST Host Virtual Microphone** (or the name supplied with `--name`). This needs verification on the target distribution and PipeWire version; if the node is exposed as an application stream instead of a selectable source, the virtual-source publication strategy will need adjustment.
 

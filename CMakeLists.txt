@@ -67,6 +67,7 @@ if(VST_HOST_ENABLE_VST3 OR VST3_SDK_ROOT)
     # These platform-specific hosting and provider implementations are not
     # included in sdk_hosting's source list by this SDK revision.
     target_sources(sdk_hosting PRIVATE
+        "${_vst3_sdk_source}/public.sdk/source/common/memorystream.cpp"
         "${_vst3_sdk_source}/public.sdk/source/vst/hosting/module_linux.cpp"
         "${_vst3_sdk_source}/public.sdk/source/vst/hosting/plugprovider.cpp"
     )

@@ -6,6 +6,7 @@
 #if defined(VST_HOST_ENABLE_VST3)
 
 #include "public.sdk/source/vst/hosting/hostclasses.h"
+#include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/hosting/plugprovider.h"
 #include "pluginterfaces/base/funknown.h"
@@ -233,6 +234,38 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
     }
     impl_->editor_handler = std::make_unique<EditorComponentHandler>(impl_->editor_controller.get());
     impl_->editor_controller->setComponentHandler(impl_->editor_handler.get());
+
+    // A separate VST3 edit controller must be synchronized with the component
+    // state before its editor is created. JUCE-based plug-ins can otherwise
+    // expose no parameters and return nullptr from createView().
+    Steinberg::MemoryStream component_state;
+    const auto state_result = impl_->component->getState(&component_state);
+    if (state_result != Steinberg::kResultTrue) {
+        error = "Could not read the VST3 component state before creating its editor.";
+        impl_->editor_controller->setComponentHandler(nullptr);
+        impl_->editor_handler.reset();
+        impl_->editor_controller = nullptr;
+        return false;
+    }
+
+    const auto seek_result = component_state.seek(
+        0, Steinberg::IBStream::kIBSeekSet, nullptr);
+    if (seek_result != Steinberg::kResultOk) {
+        error = "Could not rewind the VST3 component state before synchronizing its editor.";
+        impl_->editor_controller->setComponentHandler(nullptr);
+        impl_->editor_handler.reset();
+        impl_->editor_controller = nullptr;
+        return false;
+    }
+
+    const auto sync_result = impl_->editor_controller->setComponentState(&component_state);
+    if (sync_result != Steinberg::kResultTrue) {
+        error = "The VST3 edit controller rejected the component state before editor creation.";
+        impl_->editor_controller->setComponentHandler(nullptr);
+        impl_->editor_handler.reset();
+        impl_->editor_controller = nullptr;
+        return false;
+    }
 
     impl_->editor_view = Steinberg::owned(
         impl_->editor_controller->createView(Steinberg::Vst::ViewType::kEditor));

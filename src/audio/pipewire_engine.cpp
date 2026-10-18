@@ -58,11 +58,16 @@ void on_capture_process(void* userdata) {
     pw_stream_queue_buffer(state->capture_stream, buffer);
 }
 
-void on_capture_state_changed(void*, pw_stream_state, pw_stream_state state,
+void on_capture_state_changed(void* userdata, pw_stream_state, pw_stream_state state,
                               const char* error) {
     if (state == PW_STREAM_STATE_ERROR) {
+        auto* data = static_cast<EngineState*>(userdata);
         std::fprintf(stderr, "PipeWire capture stream error: %s\n",
                      error != nullptr ? error : "unknown error");
+        data->setup_error = -EIO;
+        if (data->loop != nullptr) {
+            pw_main_loop_quit(data->loop);
+        }
     }
 }
 
@@ -100,17 +105,21 @@ void on_source_state_changed(void* userdata, pw_filter_state, pw_filter_state st
     }
 }
 
-const pw_stream_events capture_events = {
-    PW_VERSION_STREAM_EVENTS,
-    .state_changed = on_capture_state_changed,
-    .process = on_capture_process,
-};
+const pw_stream_events capture_events = [] {
+    pw_stream_events events{};
+    events.version = PW_VERSION_STREAM_EVENTS;
+    events.state_changed = on_capture_state_changed;
+    events.process = on_capture_process;
+    return events;
+}();
 
-const pw_filter_events source_events = {
-    PW_VERSION_FILTER_EVENTS,
-    .state_changed = on_source_state_changed,
-    .process = on_source_process,
-};
+const pw_filter_events source_events = [] {
+    pw_filter_events events{};
+    events.version = PW_VERSION_FILTER_EVENTS;
+    events.state_changed = on_source_state_changed;
+    events.process = on_source_process;
+    return events;
+}();
 
 } // namespace
 

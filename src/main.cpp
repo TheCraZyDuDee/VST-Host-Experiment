@@ -3,6 +3,7 @@
 #include <cerrno>
 #include <cstdlib>
 #include <iostream>
+#include <cmath>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -27,7 +28,7 @@ bool parse_gain(std::string_view text, float& gain) {
     errno = 0;
     const float parsed = std::strtof(owned.c_str(), &end);
     if (errno != 0 || end == owned.c_str() || *end != '\0' ||
-        parsed < 0.0F || parsed > 4.0F) {
+        !std::isfinite(parsed) || parsed < 0.0F || parsed > 4.0F) {
         return false;
     }
     gain = parsed;

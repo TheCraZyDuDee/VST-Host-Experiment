@@ -3,19 +3,21 @@
 ## Phase 0 — Foundation
 - [x] Establish goals and architectural constraints.
 - [x] Add a minimal CMake/C++20 scaffold.
-- [ ] Add command-line argument handling and structured diagnostics.
-- [ ] Add a small test target and CI build.
+- [x] Add the first PipeWire capture/source implementation.
+- [ ] Compile on a Linux system with PipeWire development packages and fix API/compiler issues.
+- [ ] Add unit tests for the SPSC buffer and a CI build.
 
 ## Phase 1 — Audio routing proof of concept
-- [ ] Inspect PipeWire and JACK API availability on target Linux distributions.
-- [ ] Enumerate input devices and select a microphone.
-- [ ] Capture audio and expose a named virtual source.
-- [ ] Verify routing into a second application and measure CPU use, latency, and xruns.
-- [ ] Support clean shutdown and device disconnect/reconnect.
+- [x] Add a capture stream and named virtual-source node.
+- [x] Add a fixed gain/bypass processing stage.
+- [ ] Verify microphone selection and source visibility on PipeWire/WirePlumber.
+- [ ] Test mono microphones, channel negotiation, and device disconnect/reconnect.
+- [ ] Measure latency, CPU use, buffer underruns, and dropped frames.
+- [ ] Add a status/diagnostics path for buffer statistics.
 
 ## Phase 2 — Processing graph
 - [ ] Define a real-time-safe processor interface.
-- [ ] Run a test processor (gain/bypass) through the live signal path.
+- [ ] Support runtime gain/bypass changes using bounded real-time-safe control transfer.
 - [ ] Add chain ordering, channel-layout checks, and latency reporting.
 - [ ] Add persistence for device and graph settings.
 

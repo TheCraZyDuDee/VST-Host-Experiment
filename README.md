@@ -2,6 +2,10 @@
 
 A lightweight Linux-first real-time audio host for chaining audio plugins and exposing the processed signal as a named virtual microphone.
 
+## Current status
+
+**Prototype 0.2:** a first PipeWire pass-through engine with a fixed gain processor. Plugin loading, a GUI, device enumeration, and runtime gain controls are not implemented yet. This prototype has not yet been built or tested against a live PipeWire session in this development environment.
+
 ## Goals
 
 - Keep idle/background CPU and memory use low.
@@ -10,32 +14,50 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 - Keep the audio engine independent from the user interface so a headless mode remains possible.
 - Treat Windows-only plugins as a later, optional compatibility project. Native Linux plugins come first.
 
-## Current status
-
-**Early scaffold only.** This repository establishes project direction and a minimal C++ entry point. Audio capture, plugin loading, device routing, and virtual-microphone creation are not implemented yet.
-
 ## Technical direction
 
 - **Language:** C++20.
 - **Build:** CMake.
-- **Audio:** investigate PipeWire-native integration and/or the JACK API (which can run over PipeWire); choose based on latency, virtual-device routing, and packaging tests.
-- **UI:** keep optional and separate from the engine. Qt 6 is the leading candidate, but it should not be a dependency of a headless build.
-- **Plugin hosting:** start with native Linux formats and isolate plugin-format details behind an engine interface.
+- **Audio:** PipeWire-native API, using a capture stream and a named virtual source.
+- **UI:** optional and separate from the engine. Qt 6 is a candidate, but it should not be a dependency of a headless build.
+- **Plugin hosting:** native Linux formats first, behind a format-neutral processor interface.
 
-The priority is a predictable, low-overhead audio path, not a large feature set. The real-time callback must avoid blocking operations, allocation, filesystem access, and UI work.
+The real-time path uses a bounded single-producer/single-consumer ring buffer between PipeWire callbacks. The callbacks do not take locks or allocate memory. Buffer underruns are filled with silence; overflow drops incoming frames rather than blocking the audio thread.
 
-## Build the scaffold
+## Build
 
-Requirements: CMake 3.20+ and a C++20 compiler.
+Requirements: CMake 3.20+, a C++20 compiler, PipeWire development headers and pkg-config.
+
+On Debian/Ubuntu, the relevant packages are typically:
+
+```sh
+sudo apt install build-essential cmake pkg-config libpipewire-0.3-dev
+```
+
+Build and run:
 
 ```sh
 cmake -S . -B build
 cmake --build build
+./build/vst-host --help
 ./build/vst-host
 ```
 
-The current executable only prints a status message; it does not process audio yet.
+The application must run inside a logged-in desktop/user session with PipeWire available. By default it asks PipeWire to connect to the default microphone. To target a specific PipeWire node:
 
-## Development notes
+```sh
+./build/vst-host --input NODE_ID_OR_NAME --name vst-host-mic --gain 1.0
+```
 
-See [the architecture notes](docs/architecture.md) and [the roadmap](docs/roadmap.md).
+Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. `--latency-frames 128` is the default and requests a 128-frame PipeWire interval (about 2.67 ms at 48 kHz). If you hear dropouts, try `256` (5.33 ms), `512` (10.67 ms), or `1024` (21.33 ms). On shutdown, the host reports dropped and underrun frame counts as a basic troubleshooting diagnostic. This is a request, not a guarantee: actual latency depends on the PipeWire graph and the receiving application. The host also discards stale queued audio if the virtual microphone was suspended, rather than replaying a large backlog. Gain and latency are set at startup, not changed interactively. Stop with Ctrl+C.
+
+The output source is intended to appear in applications' microphone/input-device lists as **VST Host Virtual Microphone** (or the name supplied with `--name`). This needs verification on the target distribution and PipeWire version; if the node is exposed as an application stream instead of a selectable source, the virtual-source publication strategy will need adjustment.
+
+## Known limitations
+
+- No device picker yet; `--input` accepts a PipeWire target id/name, and the default source is used otherwise.
+- Stereo F32 input is requested at 48 kHz. Compatibility with mono-only devices and other negotiated formats still needs testing.
+- No plugin hosting, chain editor, meters, persistence, or GUI yet.
+- The prototype has not been compiled or measured on a real PipeWire system, so latency, CPU use, and device compatibility are not yet established.
+
+See [architecture notes](docs/architecture.md) and [roadmap](docs/roadmap.md).

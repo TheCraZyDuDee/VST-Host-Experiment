@@ -338,7 +338,7 @@ int PipeWireEngine::run() {
         result = impl_->state.setup_error;
         const auto dropped = impl_->state.ring.dropped_frames();
         const auto underruns = impl_->state.ring.underrun_frames();
-        std::printf("Audio diagnostics: dropped=%llu frames (%.2f ms), underrun=%llu frames (%.2f ms)\\n",
+        std::printf("Audio diagnostics: dropped=%llu frames (%.2f ms), underrun=%llu frames (%.2f ms)\n",
                     static_cast<unsigned long long>(dropped),
                     1000.0 * static_cast<double>(dropped) / sample_rate,
                     static_cast<unsigned long long>(underruns),

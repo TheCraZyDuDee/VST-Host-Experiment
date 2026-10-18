@@ -284,7 +284,7 @@ void Vst3Processor::process(float* samples, std::size_t frames) noexcept {
             if (impl_->process_failed.compare_exchange_strong(
                     expected, true, std::memory_order_relaxed)) {
                 std::fprintf(stderr,
-                             "VST3: processor process() failed (result=%d); passing dry audio through.\\n",
+                             "VST3: processor process() failed (result=%d); passing dry audio through.\n",
                              static_cast<int>(result));
             }
             std::memcpy(impl_->output_left.data(), impl_->input_left.data(),

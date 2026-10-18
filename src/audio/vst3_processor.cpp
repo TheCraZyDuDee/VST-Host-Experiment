@@ -280,7 +280,13 @@ void Vst3Processor::process(float* samples, std::size_t frames) noexcept {
         impl_->process_context.projectTimeSamples = impl_->project_time_samples;
         const auto result = impl_->processor->process(impl_->process_data);
         if (result != Steinberg::kResultOk) {
-            impl_->process_failed.store(true, std::memory_order_relaxed);
+            bool expected = false;
+            if (impl_->process_failed.compare_exchange_strong(
+                    expected, true, std::memory_order_relaxed)) {
+                std::fprintf(stderr,
+                             "VST3: processor process() failed (result=%d); passing dry audio through.\\n",
+                             static_cast<int>(result));
+            }
             std::memcpy(impl_->output_left.data(), impl_->input_left.data(),
                         block_frames * sizeof(float));
             std::memcpy(impl_->output_right.data(), impl_->input_right.data(),

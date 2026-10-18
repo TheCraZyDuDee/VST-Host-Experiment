@@ -18,6 +18,7 @@ void print_usage(const char* executable) {
         << "  --input NODE       PipeWire microphone node id/name (default: default source)\n"
         << "  --name NODE_NAME   Virtual microphone node name\n"
         << "  --gain VALUE       Linear gain from 0.0 to 4.0 (default: 1.0)\n"
+        << "  --latency-frames N 128, 256, 512, or 1024 (default: 256)\n"
         << "  --bypass           Bypass the gain processor\n"
         << "  --help             Show this help\n";
 }
@@ -50,7 +51,8 @@ int main(int argc, char** argv) {
             options.bypass = true;
             continue;
         }
-        if (arg == "--input" || arg == "--name" || arg == "--gain") {
+        if (arg == "--input" || arg == "--name" || arg == "--gain" ||
+            arg == "--latency-frames") {
             if (i + 1 >= argc) {
                 std::cerr << "Missing value for " << arg << ".\n";
                 print_usage(argv[0]);
@@ -66,9 +68,20 @@ int main(int argc, char** argv) {
                 }
                 options.output_name = value;
                 options.output_description = value;
-            } else if (!parse_gain(value, options.gain)) {
-                std::cerr << "Gain must be a number between 0.0 and 4.0.\n";
-                return 2;
+            } else if (arg == "--gain") {
+                if (!parse_gain(value, options.gain)) {
+                    std::cerr << "Gain must be a number between 0.0 and 4.0.\n";
+                    return 2;
+                }
+            } else {
+                if (value == "128") options.latency_frames = 128;
+                else if (value == "256") options.latency_frames = 256;
+                else if (value == "512") options.latency_frames = 512;
+                else if (value == "1024") options.latency_frames = 1024;
+                else {
+                    std::cerr << "Latency frames must be 128, 256, 512, or 1024.\n";
+                    return 2;
+                }
             }
             continue;
         }

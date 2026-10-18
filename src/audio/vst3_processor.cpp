@@ -11,6 +11,8 @@
 #include "pluginterfaces/base/funknown.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
+#include "pluginterfaces/gui/iplugview.h"
+#include "pluginterfaces/vst/ivsteditcontroller.h"
 #include "pluginterfaces/vst/ivstprocesscontext.h"
 
 #include <algorithm>
@@ -18,6 +20,7 @@
 #include <cstring>
 #include <memory>
 #include <vector>
+#include <cstdint>
 
 namespace Steinberg {
 FUnknown* gStandardPluginContext = new Vst::HostApplication();
@@ -40,6 +43,10 @@ struct Vst3Processor::Impl {
     Steinberg::IPtr<Steinberg::Vst::PlugProvider> provider;
     Steinberg::IPtr<Steinberg::Vst::IComponent> component;
     Steinberg::IPtr<Steinberg::Vst::IAudioProcessor> processor;
+    Steinberg::IPtr<Steinberg::Vst::IEditController> editor_controller;
+    Steinberg::IPtr<Steinberg::IPlugView> editor_view;
+    std::unique_ptr<EditorComponentHandler> editor_handler;
+    std::unique_ptr<EditorFrame> editor_frame;
     Steinberg::Vst::AudioBusBuffers input_bus{};
     Steinberg::Vst::AudioBusBuffers output_bus{};
     Steinberg::Vst::ProcessData process_data{};
@@ -59,6 +66,7 @@ Vst3Processor::Vst3Processor(std::string plugin_path)
     : impl_(std::make_unique<Impl>(std::move(plugin_path))) {}
 
 Vst3Processor::~Vst3Processor() {
+    close_editor();
 #if defined(VST_HOST_ENABLE_VST3)
     if (impl_ && impl_->processor) {
         impl_->processor->setProcessing(false);
@@ -127,6 +135,95 @@ bool Vst3Processor::load(std::string& error) {
 
     impl_->loaded = true;
     return true;
+#endif
+}
+
+
+bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
+                                std::string& error) {
+#if !defined(VST_HOST_ENABLE_VST3)
+    (void)native_parent;
+    (void)width;
+    (void)height;
+    error = "VST3 support is disabled. Configure with -DVST_HOST_ENABLE_VST3=ON.";
+    return false;
+#else
+    if (native_parent == nullptr || !impl_->provider) {
+        error = "The VST3 plug-in is not loaded or the editor parent window is invalid.";
+        return false;
+    }
+    if (impl_->editor_view) {
+        Steinberg::ViewRect current{};
+        if (impl_->editor_view->getSize(&current) == Steinberg::kResultTrue) {
+            width = current.right - current.left;
+            height = current.bottom - current.top;
+        }
+        return true;
+    }
+
+    impl_->editor_controller = Steinberg::owned(impl_->provider->getController());
+    if (!impl_->editor_controller) {
+        error = "The VST3 plug-in does not provide an edit controller.";
+        return false;
+    }
+    impl_->editor_handler = std::make_unique<EditorComponentHandler>(impl_->editor_controller.get());
+    impl_->editor_controller->setComponentHandler(impl_->editor_handler.get());
+
+    impl_->editor_view = Steinberg::owned(
+        impl_->editor_controller->createView(Steinberg::Vst::ViewType::kEditor));
+    if (!impl_->editor_view) {
+        error = "The VST3 plug-in does not provide an editor view.";
+        impl_->editor_controller->setComponentHandler(nullptr);
+        impl_->editor_handler.reset();
+        impl_->editor_controller = nullptr;
+        return false;
+    }
+
+    Steinberg::ViewRect size{};
+    if (impl_->editor_view->getSize(&size) != Steinberg::kResultTrue) {
+        error = "Could not determine the VST3 editor size.";
+        close_editor();
+        return false;
+    }
+    if (impl_->editor_view->isPlatformTypeSupported(
+            Steinberg::kPlatformTypeX11EmbedWindowID) != Steinberg::kResultTrue) {
+        error = "This plug-in editor does not support Linux X11 embedding. "
+                "Wayland-native editor embedding is not implemented yet.";
+        close_editor();
+        return false;
+    }
+
+    impl_->editor_frame = std::make_unique<EditorFrame>();
+    impl_->editor_view->setFrame(impl_->editor_frame.get());
+    if (impl_->editor_view->attached(
+            native_parent, Steinberg::kPlatformTypeX11EmbedWindowID) != Steinberg::kResultTrue) {
+        error = "The VST3 editor could not attach to the host window.";
+        impl_->editor_view->setFrame(nullptr);
+        close_editor();
+        return false;
+    }
+
+    width = size.right - size.left;
+    height = size.bottom - size.top;
+    return width > 0 && height > 0;
+#endif
+}
+
+void Vst3Processor::close_editor() noexcept {
+#if defined(VST_HOST_ENABLE_VST3)
+    if (impl_ && impl_->editor_view) {
+        impl_->editor_view->setFrame(nullptr);
+        impl_->editor_view->removed();
+        impl_->editor_view = nullptr;
+    }
+    if (impl_ && impl_->editor_controller) {
+        impl_->editor_controller->setComponentHandler(nullptr);
+    }
+    if (impl_) {
+        impl_->editor_frame.reset();
+        impl_->editor_handler.reset();
+        impl_->editor_controller = nullptr;
+    }
 #endif
 }
 

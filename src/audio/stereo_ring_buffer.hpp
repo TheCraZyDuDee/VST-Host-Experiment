@@ -38,6 +38,25 @@ public:
         }
     }
 
+    // Reads interleaved stereo samples, filling any underrun with silence.
+    void pop_interleaved(float* samples, std::size_t frames) noexcept {
+        const auto read = read_index_.load(std::memory_order_relaxed);
+        const auto write = write_index_.load(std::memory_order_acquire);
+        const auto count = std::min(frames, static_cast<std::size_t>(write - read));
+
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto& frame = frames_[(read + i) % capacity_frames];
+            samples[i * 2] = frame.left;
+            samples[i * 2 + 1] = frame.right;
+        }
+        std::fill(samples + count * 2, samples + frames * 2, 0.0F);
+
+        read_index_.store(read + count, std::memory_order_release);
+        if (count < frames) {
+            underrun_frames_.fetch_add(frames - count, std::memory_order_relaxed);
+        }
+    }
+
     // Reads up to the requested number of frames, filling any underrun with silence.
     void pop_planar(float* left, float* right, std::size_t frames) noexcept {
         const auto read = read_index_.load(std::memory_order_relaxed);

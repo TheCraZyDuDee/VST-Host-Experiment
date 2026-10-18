@@ -26,7 +26,7 @@ The real-time path uses a bounded single-producer/single-consumer ring buffer be
 
 ## Build
 
-Requirements for the default build: CMake 3.20+, a C++20 compiler, PipeWire development headers and pkg-config. To enable VST3 hosting, install CMake 3.25+ and clone the Steinberg SDK with its submodules.
+Requirements for the default build: CMake 3.20+, a C++20 compiler, PipeWire development headers and pkg-config. Enabling VST3 hosting requires CMake 3.25+ and a network connection on the first configure unless you already have the SDK locally.
 
 On Debian/Ubuntu, the relevant packages are typically:
 
@@ -34,7 +34,7 @@ On Debian/Ubuntu, the relevant packages are typically:
 sudo apt install build-essential cmake pkg-config libpipewire-0.3-dev
 ```
 
-Build and run:
+Build and run without downloading the VST3 SDK:
 
 ```sh
 cmake -S . -B build
@@ -43,15 +43,15 @@ cmake --build build
 ./build/vst-host
 ```
 
-To enable VST3 hosting, clone the SDK recursively and pass its directory at configure time:
+To enable VST3 hosting, let CMake fetch the pinned Steinberg SDK and build the required hosting components as part of the same build:
 
 ```sh
-git clone --recursive https://github.com/steinbergmedia/vst3sdk.git ~/src/vst3sdk
-cmake -S . -B build-vst3 -DVST3_SDK_ROOT=$HOME/src/vst3sdk
+cmake -S . -B build-vst3 -DVST_HOST_ENABLE_VST3=ON
 cmake --build build-vst3
+ctest --test-dir build-vst3 --output-on-failure
 ```
 
-The SDK is optional and is not downloaded automatically. Its license and usage notes are available in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
+The first configure downloads the SDK and its required source submodules; later builds reuse them in the CMake build directory. VSTGUI and the SDK's example plugins are disabled because this headless host does not need them. To use an SDK checkout you already have instead, pass `-DVST3_SDK_ROOT=/path/to/vst3sdk` with `-DVST_HOST_ENABLE_VST3=ON`. VST3 hosting stays optional, so the normal build does not need a network connection or the SDK. The SDK is distributed under the terms in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
 
 The application must run inside a logged-in desktop/user session with PipeWire available. By default it asks PipeWire to connect to the default microphone. To target a specific PipeWire node:
 

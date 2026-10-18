@@ -30,6 +30,9 @@ if(VST3_SDK_ROOT)
     if(NOT TARGET sdk_hosting)
         message(FATAL_ERROR "The selected VST3 SDK did not define sdk_hosting. Ensure the SDK checkout includes its recursive submodules.")
     endif()
+    # PlugProvider is a host helper used by the SDK samples but is not part of
+    # sdk_hosting in every SDK revision, so compile it into the host target.
+    target_sources(sdk_hosting PRIVATE "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting/plugprovider.cpp")
     set(VST_HOST_HAVE_VST3 ON)
 else()
     set(VST_HOST_HAVE_VST3 OFF)

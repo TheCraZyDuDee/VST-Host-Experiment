@@ -18,7 +18,7 @@ void print_usage(const char* executable) {
         << "  --input NODE       PipeWire microphone node id/name (default: default source)\n"
         << "  --name NODE_NAME   Virtual microphone node name\n"
         << "  --gain VALUE       Linear gain from 0.0 to 4.0 (default: 1.0)\n"
-        << "  --latency-frames N 128, 256, 512, or 1024 (default: 256)\n"
+        << "  --latency-frames N 128, 256, 512, or 1024 (default: 128)\n"
         << "  --bypass           Bypass the gain processor\n"
         << "  --help             Show this help\n";
 }

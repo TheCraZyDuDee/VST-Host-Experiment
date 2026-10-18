@@ -121,8 +121,7 @@ bool Vst3Processor::load(std::string& error) {
         impl_->module.reset();
         return false;
     }
-    impl_->processor = raw_processor;
-    raw_processor->release();
+    impl_->processor = Steinberg::owned(raw_processor);
 
     impl_->loaded = true;
     return true;

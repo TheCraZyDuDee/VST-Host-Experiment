@@ -365,6 +365,9 @@ int PipeWireEngine::run() {
     if (result == 0) {
         result = impl_->create_capture_stream();
     }
+    if (result == 0 && impl_->state.plugin_processor) {
+        impl_->published_plugin.store(impl_->state.plugin_processor.get(), std::memory_order_release);
+    }
     if (result == 0) {
         std::printf("Virtual microphone: %s\n", impl_->options.output_name.c_str());
         std::printf("Input: %s\n",

@@ -13,6 +13,7 @@
 #include <atomic>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace Steinberg {

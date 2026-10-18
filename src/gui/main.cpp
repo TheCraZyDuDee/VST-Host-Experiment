@@ -3,6 +3,7 @@
 
 #include <QApplication>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
@@ -15,11 +16,13 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QPointer>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <thread>
 
@@ -249,11 +252,11 @@ private:
 
     void pollEngine() {
         if (!engine_) return;
-        if (engine_->plugin_processor() != nullptr) {
-            editorButton_->setEnabled(true);
-            status_->setText(tr("Audio is running. Plugin editor is available."));
-        }
         if (engineFinished_.load(std::memory_order_acquire)) {
+            if (editorDialog_) {
+                editorDialog_->close();
+                editorDialog_ = nullptr;
+            }
             if (worker_.joinable()) worker_.join();
             engine_.reset();
             startButton_->setEnabled(true);
@@ -262,6 +265,11 @@ private:
             status_->setText(engineResult_ == 0
                                  ? tr("Audio engine stopped.")
                                  : tr("Audio engine exited with an error. See the terminal output for details."));
+            return;
+        }
+        if (engine_->plugin_processor() != nullptr) {
+            editorButton_->setEnabled(true);
+            status_->setText(tr("Audio is running. Plugin editor is available."));
         }
     }
 

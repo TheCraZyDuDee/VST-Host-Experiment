@@ -169,6 +169,13 @@ bool Vst3Processor::load(std::string& error) {
         return false;
     }
 
+    // PlugProvider obtains the host context from PluginContextFactory. Creating a
+    // HostApplication object alone is not enough: register it before initializing
+    // the plug-in, otherwise JUCE VST3 controllers may initialize without a host
+    // context and fail to bind to their component/editor processor.
+    Steinberg::Vst::PluginContextFactory::instance().setPluginContext(
+        Steinberg::gStandardPluginContext);
+
     impl_->provider = Steinberg::owned(
         new Steinberg::Vst::PlugProvider(factory, *selected, true));
     if (!impl_->provider || !impl_->provider->initialize()) {

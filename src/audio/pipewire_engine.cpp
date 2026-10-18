@@ -273,6 +273,8 @@ PipeWireEngine::~PipeWireEngine() {
     if (impl_ == nullptr) {
         return;
     }
+    impl_->published_plugin.store(nullptr, std::memory_order_release);
+    impl_->published_loop.store(nullptr, std::memory_order_release);
     if (impl_->state.capture_stream != nullptr) {
         pw_stream_destroy(impl_->state.capture_stream);
     }
@@ -292,6 +294,17 @@ PipeWireEngine::~PipeWireEngine() {
         pw_deinit();
     }
     delete impl_;
+}
+
+void PipeWireEngine::request_stop() noexcept {
+    if (impl_ == nullptr) return;
+    if (auto* loop = impl_->published_loop.load(std::memory_order_acquire)) {
+        pw_main_loop_quit(loop);
+    }
+}
+
+Vst3Processor* PipeWireEngine::plugin_processor() const noexcept {
+    return impl_ ? impl_->published_plugin.load(std::memory_order_acquire) : nullptr;
 }
 
 int PipeWireEngine::run() {
@@ -332,6 +345,7 @@ int PipeWireEngine::run() {
             return -EINVAL;
         }
         impl_->state.plugin_processor = std::move(plugin);
+        impl_->published_plugin.store(impl_->state.plugin_processor.get(), std::memory_order_release);
     }
 
     const AudioProcessSpec process_spec{sample_rate, channel_count, 1024};

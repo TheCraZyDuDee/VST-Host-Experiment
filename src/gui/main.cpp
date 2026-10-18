@@ -192,6 +192,15 @@ private:
         options.latency_frames = latency_->currentText().toUInt();
         options.bypass = bypass_->isChecked();
 
+        auto plugin = std::make_shared<vst_host::audio::Vst3Processor>(pluginPath.toStdString());
+        std::string pluginError;
+        if (!plugin->load(pluginError)) {
+            QMessageBox::critical(this, tr("Could not load plugin"),
+                                  QString::fromStdString(pluginError));
+            return;
+        }
+        options.preloaded_plugin = std::move(plugin);
+
         engine_ = std::make_unique<vst_host::audio::PipeWireEngine>(std::move(options));
         engineFinished_.store(false, std::memory_order_release);
         engineResult_ = 0;

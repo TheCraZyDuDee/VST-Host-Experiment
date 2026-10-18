@@ -218,8 +218,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
         impl_->component->setActive(false);
         return false;
     }
-    impl_->latency = static_cast<std::uint32_t>(
-        std::max<Steinberg::int32>(0, impl_->processor->getLatencySamples()));
+    impl_->latency = impl_->processor->getLatencySamples();
     impl_->project_time_samples = 0;
     return true;
 #endif

@@ -1,6 +1,5 @@
 #include "audio/stereo_ring_buffer.hpp"
 
-#include <cassert>
 #include <vector>
 
 int main() {
@@ -14,15 +13,19 @@ int main() {
     float right[4]{};
     buffer.pop_planar(left, right, 4);
 
-    assert(left[0] == 0.25F && right[0] == -0.25F);
-    assert(left[1] == 0.5F && right[1] == -0.5F);
-    assert(left[2] == 0.75F && right[2] == -0.75F);
-    assert(left[3] == 0.0F && right[3] == 0.0F);
-    assert(buffer.underrun_frames() == 1);
+    if (left[0] != 0.25F || right[0] != -0.25F ||
+        left[1] != 0.5F || right[1] != -0.5F ||
+        left[2] != 0.75F || right[2] != -0.75F ||
+        left[3] != 0.0F || right[3] != 0.0F ||
+        buffer.underrun_frames() != 1) {
+        return 1;
+    }
 
     StereoRingBuffer full;
     std::vector<float> oversized((StereoRingBuffer::capacity_frames + 1) * 2, 0.125F);
     full.push_interleaved(oversized.data(), StereoRingBuffer::capacity_frames + 1);
-    assert(full.dropped_frames() == 1);
+    if (full.dropped_frames() != 1) {
+        return 2;
+    }
     return 0;
 }

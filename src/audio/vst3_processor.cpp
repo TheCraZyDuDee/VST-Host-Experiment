@@ -159,7 +159,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
                                                             Steinberg::Vst::kOutput);
     if (input_count < 1 || output_count < 1) {
         std::fprintf(stderr,
-                     "VST3: plugin has insufficient audio buses (inputs=%d, outputs=%d).\\n",
+                     "VST3: plugin has insufficient audio buses (inputs=%d, outputs=%d).\n",
                      input_count, output_count);
         return false;
     }
@@ -170,7 +170,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
         const auto result = impl_->component->activateBus(
             Steinberg::Vst::kAudio, Steinberg::Vst::kInput, i, i == 0);
         if (result != Steinberg::kResultOk) {
-            std::fprintf(stderr, "VST3: activateBus(input, %d, %s) failed (result=%d).\\n",
+            std::fprintf(stderr, "VST3: activateBus(input, %d, %s) failed (result=%d).\n",
                          i, i == 0 ? "active" : "inactive", static_cast<int>(result));
             return false;
         }
@@ -179,7 +179,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
         const auto result = impl_->component->activateBus(
             Steinberg::Vst::kAudio, Steinberg::Vst::kOutput, i, i == 0);
         if (result != Steinberg::kResultOk) {
-            std::fprintf(stderr, "VST3: activateBus(output, %d, %s) failed (result=%d).\\n",
+            std::fprintf(stderr, "VST3: activateBus(output, %d, %s) failed (result=%d).\n",
                          i, i == 0 ? "active" : "inactive", static_cast<int>(result));
             return false;
         }
@@ -193,7 +193,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
         &input_arrangement, 1, &output_arrangement, 1);
     if (arrangement_result != Steinberg::kResultOk) {
         std::fprintf(stderr,
-                     "VST3: plugin rejected stereo main input/output bus arrangement (result=%d).\\n",
+                     "VST3: plugin rejected stereo main input/output bus arrangement (result=%d).\n",
                      static_cast<int>(arrangement_result));
         return false;
     }
@@ -206,7 +206,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
     const auto setup_result = impl_->processor->setupProcessing(setup);
     if (setup_result != Steinberg::kResultOk) {
         std::fprintf(stderr,
-                     "VST3: setupProcessing failed (rate=%.0f Hz, max block=%d, result=%d).\\n",
+                     "VST3: setupProcessing failed (rate=%.0f Hz, max block=%d, result=%d).\n",
                      setup.sampleRate, setup.maxSamplesPerBlock,
                      static_cast<int>(setup_result));
         return false;
@@ -234,13 +234,13 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
 
     const auto active_result = impl_->component->setActive(true);
     if (active_result != Steinberg::kResultOk) {
-        std::fprintf(stderr, "VST3: component setActive(true) failed (result=%d).\\n",
+        std::fprintf(stderr, "VST3: component setActive(true) failed (result=%d).\n",
                      static_cast<int>(active_result));
         return false;
     }
     const auto processing_result = impl_->processor->setProcessing(true);
     if (processing_result != Steinberg::kResultOk) {
-        std::fprintf(stderr, "VST3: processor setProcessing(true) failed (result=%d).\\n",
+        std::fprintf(stderr, "VST3: processor setProcessing(true) failed (result=%d).\n",
                      static_cast<int>(processing_result));
         impl_->component->setActive(false);
         return false;

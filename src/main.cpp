@@ -13,10 +13,11 @@ namespace {
 void print_usage(const char* executable) {
     std::cout
         << "Usage: " << executable << " [options]\n\n"
-        << "Start a lightweight PipeWire microphone pass-through with gain.\n\n"
+        << "Start a lightweight PipeWire microphone pass-through with optional VST3 effect.\n\n"
         << "Options:\n"
         << "  --input NODE       PipeWire microphone node id/name (default: default source)\n"
         << "  --name NODE_NAME   Virtual microphone node name\n"
+        << "  --plugin PATH      Load a native Linux VST3 effect bundle (optional)\n"
         << "  --gain VALUE       Linear gain from 0.0 to 4.0 (default: 1.0)\n"
         << "  --latency-frames N 128, 256, 512, or 1024 (default: 128)\n"
         << "  --bypass           Bypass the gain processor\n"
@@ -51,8 +52,8 @@ int main(int argc, char** argv) {
             options.bypass = true;
             continue;
         }
-        if (arg == "--input" || arg == "--name" || arg == "--gain" ||
-            arg == "--latency-frames") {
+        if (arg == "--input" || arg == "--name" || arg == "--plugin" ||
+            arg == "--gain" || arg == "--latency-frames") {
             if (i + 1 >= argc) {
                 std::cerr << "Missing value for " << arg << ".\n";
                 print_usage(argv[0]);
@@ -68,6 +69,12 @@ int main(int argc, char** argv) {
                 }
                 options.output_name = value;
                 options.output_description = value;
+            } else if (arg == "--plugin") {
+                if (value.empty()) {
+                    std::cerr << "Plugin path cannot be empty.\n";
+                    return 2;
+                }
+                options.plugin_path = value;
             } else if (arg == "--gain") {
                 if (!parse_gain(value, options.gain)) {
                     std::cerr << "Gain must be a number between 0.0 and 4.0.\n";

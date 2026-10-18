@@ -2,6 +2,7 @@
 
 #include "stereo_ring_buffer.hpp"
 #include "gain_processor.hpp"
+#include "vst3_processor.hpp"
 
 #include <pipewire/pipewire.h>
 
@@ -12,6 +13,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -30,6 +32,7 @@ struct EngineState {
     pw_stream* source_stream{};
     StereoRingBuffer ring;
     GainProcessor processor;
+    std::unique_ptr<Vst3Processor> plugin_processor;
     std::size_t latency_frames{128};
     int setup_error{0};
 };
@@ -96,6 +99,9 @@ void on_source_process(void* userdata) {
         auto* samples = reinterpret_cast<float*>(data.data);
 
         state->ring.pop_interleaved(samples, frames, state->latency_frames * 2);
+        if (state->plugin_processor) {
+            state->plugin_processor->process(samples, frames);
+        }
         state->processor.process(samples, frames);
 
         data.chunk->offset = 0;
@@ -315,9 +321,24 @@ int PipeWireEngine::run() {
     pw_loop_add_signal(pw_main_loop_get_loop(impl_->state.loop), SIGTERM,
                        request_shutdown, &impl_->state);
 
+    if (!impl_->options.plugin_path.empty()) {
+        auto plugin = std::make_unique<Vst3Processor>(impl_->options.plugin_path);
+        std::string plugin_error;
+        if (!plugin->load(plugin_error)) {
+            std::fprintf(stderr, "Could not load VST3 plugin: %s\n", plugin_error.c_str());
+            return -EINVAL;
+        }
+        impl_->state.plugin_processor = std::move(plugin);
+    }
+
     const AudioProcessSpec process_spec{sample_rate, channel_count, 1024};
     if (!impl_->state.processor.prepare(process_spec)) {
         std::fprintf(stderr, "Could not prepare audio processor.\n");
+        return -EINVAL;
+    }
+    if (impl_->state.plugin_processor &&
+        !impl_->state.plugin_processor->prepare(process_spec)) {
+        std::fprintf(stderr, "Could not prepare the VST3 plugin for stereo 48 kHz audio.\n");
         return -EINVAL;
     }
 
@@ -335,6 +356,11 @@ int PipeWireEngine::run() {
         std::printf("Requested latency: %zu frames (%.2f ms at 48 kHz)\n",
                     impl_->options.latency_frames,
                     1000.0 * static_cast<double>(impl_->options.latency_frames) / sample_rate);
+        if (impl_->state.plugin_processor) {
+            std::printf("VST3 plugin: %s\n", impl_->options.plugin_path.c_str());
+            std::printf("Plugin latency: %u frames\n",
+                        impl_->state.plugin_processor->latency_frames());
+        }
         std::printf("Press Ctrl+C to stop.\n");
         pw_main_loop_run(impl_->state.loop);
         result = impl_->state.setup_error;

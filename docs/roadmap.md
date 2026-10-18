@@ -22,9 +22,11 @@
 - [ ] Add persistence for device and graph settings.
 
 ## Phase 3 — Native plugins
-- [ ] Evaluate VST3 hosting libraries/SDK integration and licensing, including the Steinberg SDK terms and dependency strategy.
-- [ ] Discover and load a native Linux VST3 plugin.
-- [ ] Handle plugin state, bypass, failures, and sample-rate/block-size changes.
+- [x] Evaluate the Steinberg VST3 SDK license and optional dependency strategy.
+- [x] Add an initial optional VST3 adapter and `--plugin PATH` support for one stereo audio effect.
+- [ ] Build with the SDK and validate load/process/unload against a real native Linux VST3 plugin.
+- [ ] Improve bus negotiation, plug-in failure reporting, state, bypass, and sample-rate/block-size changes.
+- [ ] Add a multi-plugin chain and parameter/state persistence.
 - [ ] Evaluate VST2 support and distribution implications separately.
 
 ## Phase 4 — User interface

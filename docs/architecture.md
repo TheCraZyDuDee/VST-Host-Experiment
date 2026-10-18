@@ -35,6 +35,6 @@ PipeWire format negotiation, mono devices, node exposure in different desktop en
 
 ## Plugin strategy
 
-Implement and test native Linux plugins first. Keep a format-neutral processor interface so plugin hosting can be replaced or extended without changing device routing. Evaluate VST3 hosting options and licensing before committing to a framework or vendored SDK. VST2 support requires a separate licensing/distribution review.
+Implement and test native Linux plugins first. The initial VST3 adapter uses the Steinberg hosting SDK when `VST3_SDK_ROOT` is supplied at configure time; the SDK is optional and the default build remains SDK-free. It loads one audio-effect class from a selected bundle and currently supports the first stereo input/output bus. Plug-in discovery, multi-effect chains, controller/editor support, state persistence, and robust bus negotiation remain future work. The audio callback uses preallocated planar scratch buffers to adapt the host’s interleaved stereo format to VST3’s process API. Third-party plug-ins are not guaranteed to be real-time safe, and this initial adapter still requires build and runtime validation with real Linux effects. VST2 support requires a separate licensing/distribution review.
 
 Windows-only plugins are out of scope for the first working prototype. A later Wine-based compatibility layer would require its own helper process, diagnostics, and per-plugin compatibility tests; it must not be a prerequisite for native Linux use.

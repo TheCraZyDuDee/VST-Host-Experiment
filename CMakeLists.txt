@@ -13,14 +13,82 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 
+option(VST_HOST_ENABLE_VST3 "Enable native VST3 hosting (fetch the SDK automatically if needed)" OFF)
+set(VST3_SDK_ROOT "" CACHE PATH "Optional path to an existing Steinberg VST3 SDK checkout")
+
+if(VST_HOST_ENABLE_VST3 OR VST3_SDK_ROOT)
+    if(CMAKE_VERSION VERSION_LESS 3.25)
+        message(FATAL_ERROR "VST3 hosting requires CMake 3.25 or newer. Upgrade CMake or disable VST3 hosting.")
+    endif()
+
+    # Steinberg's SDK requires DEVELOPMENT, RELEASE, _DEBUG, or NDEBUG.
+    # Single-config generators (such as Unix Makefiles) otherwise default to
+    # an empty build type, so choose Release unless the user specified one.
+    if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+        set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+        message(STATUS "No build type specified; defaulting to Release for VST3 SDK compatibility.")
+    endif()
+
+    if(VST3_SDK_ROOT)
+        if(NOT EXISTS "${VST3_SDK_ROOT}/CMakeLists.txt")
+            message(FATAL_ERROR "VST3_SDK_ROOT must point to the root of the Steinberg vst3sdk checkout.")
+        endif()
+        set(_vst3_sdk_source "${VST3_SDK_ROOT}")
+        message(STATUS "Using existing VST3 SDK at: ${_vst3_sdk_source}")
+        set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+        add_subdirectory("${_vst3_sdk_source}" "${CMAKE_BINARY_DIR}/vst3sdk" EXCLUDE_FROM_ALL)
+    else()
+        include(FetchContent)
+
+        # Pin the SDK revision so clean builds remain reproducible. Only the
+        # core SDK submodules are fetched; VSTGUI is not needed by this host.
+        set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+
+        FetchContent_Declare(vst3sdk
+            GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
+            GIT_TAG v3.8.0_build_66
+            GIT_SHALLOW TRUE
+            GIT_SUBMODULES base pluginterfaces public.sdk cmake
+            GIT_SUBMODULES_RECURSE TRUE
+        )
+        FetchContent_MakeAvailable(vst3sdk)
+        set(_vst3_sdk_source "${vst3sdk_SOURCE_DIR}")
+    endif()
+
+    if(NOT TARGET sdk_hosting)
+        message(FATAL_ERROR "The selected VST3 SDK did not define sdk_hosting. Check that its required submodules were fetched.")
+    endif()
+
+    # These platform-specific hosting and provider implementations are not
+    # included in sdk_hosting's source list by this SDK revision.
+    target_sources(sdk_hosting PRIVATE
+        "${_vst3_sdk_source}/public.sdk/source/vst/hosting/module_linux.cpp"
+        "${_vst3_sdk_source}/public.sdk/source/vst/hosting/plugprovider.cpp"
+    )
+    set(VST_HOST_HAVE_VST3 ON)
+else()
+    set(VST_HOST_HAVE_VST3 OFF)
+    message(STATUS "VST3 support disabled. Set -DVST_HOST_ENABLE_VST3=ON to fetch and build the SDK automatically.")
+endif()
+
 add_executable(vst-host
     src/main.cpp
     src/audio/pipewire_engine.cpp
     src/audio/gain_processor.cpp
+    src/audio/vst3_processor.cpp
 )
 
 target_compile_features(vst-host PRIVATE cxx_std_20)
 target_link_libraries(vst-host PRIVATE PkgConfig::PIPEWIRE)
+
+if(VST_HOST_HAVE_VST3)
+    target_compile_definitions(vst-host PRIVATE VST_HOST_ENABLE_VST3=1)
+    target_link_libraries(vst-host PRIVATE sdk_hosting)
+endif()
 
 include(CTest)
 if(BUILD_TESTING)
@@ -33,6 +101,11 @@ if(BUILD_TESTING)
     target_include_directories(audio-processor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(audio-processor-test PRIVATE cxx_std_20)
     add_test(NAME audio-processor-test COMMAND audio-processor-test)
+
+    add_executable(vst3-processor-test tests/vst3_processor_test.cpp src/audio/vst3_processor.cpp)
+    target_include_directories(vst3-processor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(vst3-processor-test PRIVATE cxx_std_20)
+    add_test(NAME vst3-processor-test COMMAND vst3-processor-test)
 endif()
 
 if(MSVC)

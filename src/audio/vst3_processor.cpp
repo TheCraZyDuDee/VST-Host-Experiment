@@ -426,15 +426,28 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
         }
     }
 
-    input_arrangements[0] = Steinberg::Vst::SpeakerArr::kStereo;
-    output_arrangements[0] = Steinberg::Vst::SpeakerArr::kStereo;
-    const auto arrangement_result = impl_->processor->setBusArrangements(
-        input_arrangements.data(), input_count,
-        output_arrangements.data(), output_count);
-    if (arrangement_result != Steinberg::kResultOk) {
+    // Prefer stereo, then fall back to mono main buses when the plug-in rejects stereo.
+    constexpr Steinberg::int32 layouts[][2] = {{2, 2}, {1, 2}, {2, 1}, {1, 1}};
+    bool arrangement_accepted = false;
+    Steinberg::tresult arrangement_result = Steinberg::kResultFalse;
+    for (const auto& layout : layouts) {
+        input_arrangements[0] = layout[0] == 2
+            ? Steinberg::Vst::SpeakerArr::kStereo : Steinberg::Vst::SpeakerArr::kMono;
+        output_arrangements[0] = layout[1] == 2
+            ? Steinberg::Vst::SpeakerArr::kStereo : Steinberg::Vst::SpeakerArr::kMono;
+        arrangement_result = impl_->processor->setBusArrangements(
+            input_arrangements.data(), input_count, output_arrangements.data(), output_count);
+        if (arrangement_result == Steinberg::kResultOk) {
+            impl_->input_channel_count = layout[0];
+            impl_->output_channel_count = layout[1];
+            arrangement_accepted = true;
+            break;
+        }
+    }
+    if (!arrangement_accepted) {
         std::fprintf(stderr,
-                     "VST3: plugin rejected stereo main input/output bus arrangement "
-                     "(inputs=%d, outputs=%d, result=%d).\n",
+                     "VST3: plugin rejected stereo and mono main bus arrangements "
+                     "(inputs=%d, outputs=%d, result=%d).\\n",
                      input_count, output_count, static_cast<int>(arrangement_result));
         return false;
     }

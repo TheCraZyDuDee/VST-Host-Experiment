@@ -315,6 +315,9 @@ int PipeWireEngine::run() {
     impl_->initialized = true;
 
     impl_->state.loop = pw_main_loop_new(nullptr);
+    if (impl_->state.loop != nullptr) {
+        impl_->published_loop.store(impl_->state.loop, std::memory_order_release);
+    }
     if (impl_->state.loop == nullptr) {
         std::fprintf(stderr, "Could not create PipeWire main loop.\n");
         return -ENOMEM;

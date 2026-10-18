@@ -39,10 +39,23 @@ public:
     }
 
     // Reads interleaved stereo samples, filling any underrun with silence.
-    void pop_interleaved(float* samples, std::size_t frames) noexcept {
-        const auto read = read_index_.load(std::memory_order_relaxed);
+    void pop_interleaved(float* samples, std::size_t frames,
+                         std::size_t max_backlog_frames = 512) noexcept {
+        auto read = read_index_.load(std::memory_order_relaxed);
         const auto write = write_index_.load(std::memory_order_acquire);
-        const auto count = std::min(frames, static_cast<std::size_t>(write - read));
+        auto available = static_cast<std::size_t>(write - read);
+
+        // Discard stale audio if the consumer was suspended or fell behind.
+        // Keep a small cushion for scheduling jitter instead of replaying a long queue.
+        if (available > frames && available - frames > max_backlog_frames) {
+            const auto discard = available - frames - max_backlog_frames;
+            read += discard;
+            read_index_.store(read, std::memory_order_release);
+            dropped_frames_.fetch_add(discard, std::memory_order_relaxed);
+            available -= discard;
+        }
+
+        const auto count = std::min(frames, available);
 
         for (std::size_t i = 0; i < count; ++i) {
             const auto& frame = frames_[(read + i) % capacity_frames];

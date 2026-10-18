@@ -21,12 +21,142 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <X11/Xatom.h>
+#include <X11/Xlib.h>
+
 #include <atomic>
 #include <cstdint>
 #include <memory>
 #include <thread>
+#include <algorithm>
+#include <vector>
 
 namespace {
+
+class XEmbedSurface final {
+public:
+    explicit XEmbedSurface(Window qtParent) {
+        display_ = XOpenDisplay(nullptr);
+        if (!display_) {
+            error_ = "Could not open the X11 display for the VST3 editor host.";
+            return;
+        }
+        window_ = XCreateSimpleWindow(display_, qtParent, 0, 0, 320, 180, 0, 0, 0);
+        if (!window_) {
+            error_ = "Could not create the native X11 editor container.";
+            XCloseDisplay(display_);
+            display_ = nullptr;
+            return;
+        }
+        XSelectInput(display_, window_, StructureNotifyMask | SubstructureNotifyMask |
+                                         SubstructureRedirectMask | ExposureMask);
+        xembedAtom_ = XInternAtom(display_, "_XEMBED", False);
+        XMapWindow(display_, window_);
+        XFlush(display_);
+        pollTimer_ = new QTimer();
+        pollTimer_->setInterval(15);
+        QObject::connect(pollTimer_, &QTimer::timeout, [this] { pumpEvents(); });
+        pollTimer_->start();
+    }
+
+    ~XEmbedSurface() {
+        if (pollTimer_) {
+            pollTimer_->stop();
+            delete pollTimer_;
+        }
+        if (display_) {
+            if (window_) XDestroyWindow(display_, window_);
+            XCloseDisplay(display_);
+        }
+    }
+
+    bool valid() const { return display_ != nullptr && window_ != 0; }
+    Window window() const { return window_; }
+    const std::string& error() const { return error_; }
+
+    void resizeTo(int width, int height) {
+        lastWidth_ = std::max(1, width);
+        lastHeight_ = std::max(1, height);
+        if (!valid()) return;
+        XResizeWindow(display_, window_, static_cast<unsigned int>(lastWidth_),
+                      static_cast<unsigned int>(lastHeight_));
+        for (const auto child : children_) {
+            XMoveResizeWindow(display_, child, 0, 0,
+                              static_cast<unsigned int>(lastWidth_),
+                              static_cast<unsigned int>(lastHeight_));
+        }
+        XFlush(display_);
+    }
+
+private:
+    void sendEmbeddedNotify(Window child) {
+        XEvent message{};
+        message.xclient.type = ClientMessage;
+        message.xclient.display = display_;
+        message.xclient.window = child;
+        message.xclient.message_type = xembedAtom_;
+        message.xclient.format = 32;
+        message.xclient.data.l[0] = CurrentTime;
+        message.xclient.data.l[1] = 0; // XEMBED_EMBEDDED_NOTIFY
+        message.xclient.data.l[2] = static_cast<long>(window_);
+        message.xclient.data.l[3] = 0;
+        message.xclient.data.l[4] = 0;
+        XSendEvent(display_, child, False, NoEventMask, &message);
+    }
+
+    void pumpEvents() {
+        if (!valid()) return;
+        while (XPending(display_) > 0) {
+            XEvent event{};
+            XNextEvent(display_, &event);
+            switch (event.type) {
+            case CreateNotify:
+                if (event.xcreatewindow.parent == window_) {
+                    const Window child = event.xcreatewindow.window;
+                    children_.push_back(child);
+                    sendEmbeddedNotify(child);
+                    XMapWindow(display_, child);
+                    XMoveResizeWindow(display_, child, 0, 0,
+                                      static_cast<unsigned int>(lastWidth_),
+                                      static_cast<unsigned int>(lastHeight_));
+                }
+                break;
+            case MapRequest:
+                XMapWindow(display_, event.xmaprequest.window);
+                break;
+            case ConfigureRequest: {
+                const auto& request = event.xconfigurerequest;
+                XWindowChanges changes{};
+                changes.x = request.x;
+                changes.y = request.y;
+                changes.width = request.width;
+                changes.height = request.height;
+                changes.border_width = request.border_width;
+                changes.sibling = request.above;
+                changes.stack_mode = request.detail;
+                XConfigureWindow(display_, request.window, request.value_mask, &changes);
+                break;
+            }
+            case DestroyNotify:
+                children_.erase(std::remove(children_.begin(), children_.end(),
+                                            event.xdestroywindow.window), children_.end());
+                break;
+            default:
+                break;
+            }
+        }
+        XFlush(display_);
+    }
+
+    Display* display_{};
+    Window window_{};
+    Atom xembedAtom_{};
+    QTimer* pollTimer_{};
+    int lastWidth_{320};
+    int lastHeight_{180};
+    std::vector<Window> children_;
+    std::string error_;
+};
 
 class PluginEditorDialog final : public QDialog {
 public:
@@ -60,8 +190,13 @@ public:
         int width = 0;
         int height = 0;
         std::string detail;
-        const auto nativeId = surface_->winId();
-        auto* nativeParent = reinterpret_cast<void*>(static_cast<std::uintptr_t>(nativeId));
+        const auto nativeId = static_cast<Window>(surface_->winId());
+        xembed_ = std::make_unique<XEmbedSurface>(nativeId);
+        if (!xembed_->valid()) {
+            error = QString::fromStdString(xembed_->error());
+            return false;
+        }
+        auto* nativeParent = reinterpret_cast<void*>(static_cast<std::uintptr_t>(xembed_->window()));
         if (!processor_->open_editor(nativeParent, width, height, detail)) {
             error = QString::fromStdString(detail);
             return false;
@@ -69,6 +204,7 @@ public:
         attached_ = true;
         surface_->setMinimumSize(width, height);
         surface_->resize(width, height);
+        xembed_->resizeTo(width, height);
         resize(width + 24, height + 48);
         return true;
     }
@@ -76,6 +212,7 @@ public:
 private:
     vst_host::audio::Vst3Processor* processor_{};
     QWidget* surface_{};
+    std::unique_ptr<XEmbedSurface> xembed_;
     bool attached_{false};
 };
 

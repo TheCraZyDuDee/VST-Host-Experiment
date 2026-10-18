@@ -225,8 +225,15 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
 #else
     if (native_parent == nullptr || !impl_->provider) {
         error = "The VST3 plug-in is not loaded or the editor parent window is invalid.";
+        std::fprintf(stderr,
+                     "[VST3 editor] Cannot start editor creation (parent=%p, provider=%s).\n",
+                     native_parent, impl_->provider ? "available" : "missing");
         return false;
     }
+    std::fprintf(stderr,
+                 "[VST3 editor] Starting editor creation for '%s' (X11 parent=0x%llx).\n",
+                 impl_->path.c_str(),
+                 static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(native_parent)));
     if (impl_->editor_view) {
         Steinberg::ViewRect current{};
         if (impl_->editor_view->getSize(&current) == Steinberg::kResultTrue) {
@@ -243,6 +250,8 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
     }
     impl_->editor_handler = std::make_unique<EditorComponentHandler>(impl_->editor_controller.get());
     impl_->editor_controller->setComponentHandler(impl_->editor_handler.get());
+    std::fprintf(stderr, "[VST3 editor] Edit controller acquired; parameter count=%d.\n",
+                 impl_->editor_controller->getParameterCount());
 
     // A separate VST3 edit controller must be synchronized with the component
     // state before its editor is created. JUCE-based plug-ins can otherwise
@@ -250,6 +259,8 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
     Steinberg::MemoryStream component_state;
     const auto state_result = impl_->component->getState(&component_state);
     if (state_result != Steinberg::kResultTrue) {
+        std::fprintf(stderr, "[VST3 editor] component getState failed (result=%d).\n",
+                     static_cast<int>(state_result));
         error = "Could not read the VST3 component state before creating its editor.";
         impl_->editor_controller->setComponentHandler(nullptr);
         impl_->editor_handler.reset();
@@ -260,6 +271,8 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
     const auto seek_result = component_state.seek(
         0, Steinberg::IBStream::kIBSeekSet, nullptr);
     if (seek_result != Steinberg::kResultOk) {
+        std::fprintf(stderr, "[VST3 editor] component-state rewind failed (result=%d).\n",
+                     static_cast<int>(seek_result));
         error = "Could not rewind the VST3 component state before synchronizing its editor.";
         impl_->editor_controller->setComponentHandler(nullptr);
         impl_->editor_handler.reset();
@@ -272,11 +285,19 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
     // state synchronization as best-effort and attempt createView regardless.
     const auto sync_result = impl_->editor_controller->setComponentState(&component_state);
     const bool component_state_accepted = sync_result == Steinberg::kResultTrue;
+    std::fprintf(stderr,
+                 "[VST3 editor] setComponentState result=%d (%s).\n",
+                 static_cast<int>(sync_result),
+                 component_state_accepted ? "accepted" : "rejected");
 
     impl_->editor_view = Steinberg::owned(
         impl_->editor_controller->createView(Steinberg::Vst::ViewType::kEditor));
     if (!impl_->editor_view) {
         const auto parameter_count = impl_->editor_controller->getParameterCount();
+        std::fprintf(stderr,
+                     "[VST3 editor] createView(\"editor\") returned null; parameter count=%d. "
+                     "Failure is before X11 embedding.\n",
+                     parameter_count);
         error = "The VST3 edit controller returned no editor view from createView(\"editor\"). "
                 "The controller reports " + std::to_string(parameter_count) +
                 " parameters. Component state synchronization was " +
@@ -289,14 +310,21 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
         return false;
     }
 
+    std::fprintf(stderr, "[VST3 editor] createView succeeded; checking view size and X11 support.\n");
     Steinberg::ViewRect size{};
-    if (impl_->editor_view->getSize(&size) != Steinberg::kResultTrue) {
+    const auto size_result = impl_->editor_view->getSize(&size);
+    if (size_result != Steinberg::kResultTrue) {
+        std::fprintf(stderr, "[VST3 editor] getSize failed (result=%d).\n",
+                     static_cast<int>(size_result));
         error = "Could not determine the VST3 editor size.";
         close_editor();
         return false;
     }
-    if (impl_->editor_view->isPlatformTypeSupported(
-            Steinberg::kPlatformTypeX11EmbedWindowID) != Steinberg::kResultTrue) {
+    const auto platform_result = impl_->editor_view->isPlatformTypeSupported(
+        Steinberg::kPlatformTypeX11EmbedWindowID);
+    std::fprintf(stderr, "[VST3 editor] X11 embed support result=%d.\n",
+                 static_cast<int>(platform_result));
+    if (platform_result != Steinberg::kResultTrue) {
         error = "This plug-in editor does not support Linux X11 embedding. "
                 "Wayland-native editor embedding is not implemented yet.";
         close_editor();
@@ -305,8 +333,11 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
 
     impl_->editor_frame = std::make_unique<EditorFrame>();
     impl_->editor_view->setFrame(impl_->editor_frame.get());
-    if (impl_->editor_view->attached(
-            native_parent, Steinberg::kPlatformTypeX11EmbedWindowID) != Steinberg::kResultTrue) {
+    const auto attached_result = impl_->editor_view->attached(
+        native_parent, Steinberg::kPlatformTypeX11EmbedWindowID);
+    std::fprintf(stderr, "[VST3 editor] attached() result=%d.\n",
+                 static_cast<int>(attached_result));
+    if (attached_result != Steinberg::kResultTrue) {
         error = "The VST3 editor could not attach to the host window.";
         impl_->editor_view->setFrame(nullptr);
         close_editor();
@@ -316,10 +347,13 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
     width = size.right - size.left;
     height = size.bottom - size.top;
     if (width <= 0 || height <= 0) {
+        std::fprintf(stderr, "[VST3 editor] Invalid editor size %dx%d.\n", width, height);
         error = "The VST3 editor reported an invalid size.";
         close_editor();
         return false;
     }
+    std::fprintf(stderr, "[VST3 editor] Host attachment succeeded; requested view size=%dx%d.\n",
+                 width, height);
     return true;
 #endif
 }

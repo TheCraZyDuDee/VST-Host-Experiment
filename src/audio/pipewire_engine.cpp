@@ -348,7 +348,6 @@ int PipeWireEngine::run() {
             return -EINVAL;
         }
         impl_->state.plugin_processor = std::move(plugin);
-        impl_->published_plugin.store(impl_->state.plugin_processor.get(), std::memory_order_release);
     }
 
     const AudioProcessSpec process_spec{sample_rate, channel_count, 1024};

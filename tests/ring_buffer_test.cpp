@@ -40,5 +40,19 @@ int main() {
         return 3;
     }
 
+    StereoRingBuffer backlog;
+    const float backlog_input[] = {
+        1.0F, -1.0F, 2.0F, -2.0F, 3.0F, -3.0F,
+        4.0F, -4.0F, 5.0F, -5.0F, 6.0F, -6.0F
+    };
+    backlog.push_interleaved(backlog_input, 6);
+    float recent_output[4]{};
+    backlog.pop_interleaved(recent_output, 2, 1);
+    if (recent_output[0] != 4.0F || recent_output[1] != -4.0F ||
+        recent_output[2] != 5.0F || recent_output[3] != -5.0F ||
+        backlog.dropped_frames() != 3) {
+        return 4;
+    }
+
     return 0;
 }

@@ -317,7 +317,7 @@ int PipeWireEngine::run() {
 
     const AudioProcessSpec process_spec{sample_rate, channel_count, 1024};
     if (!impl_->state.processor.prepare(process_spec)) {
-        std::fprintf(stderr, "Could not prepare audio processor.\\n");
+        std::fprintf(stderr, "Could not prepare audio processor.\n");
         return -EINVAL;
     }
 

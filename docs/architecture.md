@@ -24,7 +24,7 @@ The ring buffer avoids locks and dynamic allocation in both callbacks. Producer 
 
 PipeWire format negotiation, mono devices, node exposure in different desktop environments, and reconnect behavior need testing on actual Linux/PipeWire systems. In particular, verify that the output appears as a selectable microphone source, rather than only as an application stream. If necessary, use a supported PipeWire virtual-source/loopback topology while retaining the processing engine.
 
-## Component boundaries
+## Processor interface\n\n`AudioProcessor` defines `prepare()` for non-real-time setup, `process()` for in-place interleaved float audio, `reset()`, and optional latency reporting. The callback-facing `process()` contract forbids blocking, allocation, logging, I/O, and exceptions. The current `GainProcessor` implements this interface and is prepared before PipeWire streams start. Processor configuration is currently startup-only; live parameter updates need a bounded control-transfer mechanism before they are exposed. Native plugin adapters must follow the same contract and prepare all plugin buffers/state outside the callback.\n\n## Component boundaries
 
 - **Application shell:** command-line options, configuration path, lifecycle and diagnostics.
 - **Audio backend:** input/output stream setup, channel layout, sample-rate and buffer negotiation.

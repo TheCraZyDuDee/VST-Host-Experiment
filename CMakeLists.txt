@@ -99,6 +99,7 @@ if(VST_HOST_BUILD_GUI)
     endif()
 
     find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
+    find_package(X11 REQUIRED)
     add_executable(vst-host-gui
         src/gui/main.cpp
         src/audio/pipewire_engine.cpp
@@ -108,7 +109,7 @@ if(VST_HOST_BUILD_GUI)
     target_include_directories(vst-host-gui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(vst-host-gui PRIVATE cxx_std_20)
     target_compile_definitions(vst-host-gui PRIVATE VST_HOST_ENABLE_VST3=1)
-    target_link_libraries(vst-host-gui PRIVATE PkgConfig::PIPEWIRE Qt6::Widgets sdk_hosting)
+    target_link_libraries(vst-host-gui PRIVATE PkgConfig::PIPEWIRE Qt6::Widgets X11::X11 sdk_hosting)
     if(MSVC)
         target_compile_options(vst-host-gui PRIVATE /W4 /permissive-)
     else()

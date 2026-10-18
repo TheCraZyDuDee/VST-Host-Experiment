@@ -10,6 +10,7 @@
 #include "pluginterfaces/base/funknown.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
+#include "pluginterfaces/vst/ivstprocesscontext.h"
 
 #include <algorithm>
 #include <atomic>
@@ -40,7 +41,7 @@ struct Vst3Processor::Impl {
     Steinberg::IPtr<Steinberg::Vst::IAudioProcessor> processor;
     Steinberg::Vst::AudioBusBuffers input_bus{};
     Steinberg::Vst::AudioBusBuffers output_bus{};
-    Steinberg::Vst::AudioProcessData process_data{};
+    Steinberg::Vst::ProcessData process_data{};
     Steinberg::Vst::ProcessContext process_context{};
     float* input_channels[2]{};
     float* output_channels[2]{};
@@ -69,7 +70,7 @@ Vst3Processor::~Vst3Processor() {
 
 bool Vst3Processor::load(std::string& error) {
 #if !defined(VST_HOST_ENABLE_VST3)
-    error = "VST3 support is disabled. Configure with -DVST3_SDK_ROOT=/path/to/vst3sdk.";
+    error = "VST3 support is disabled. Configure with -DVST_HOST_ENABLE_VST3=ON.";
     return false;
 #else
     if (impl_->loaded) {
@@ -85,7 +86,7 @@ bool Vst3Processor::load(std::string& error) {
     auto factory = impl_->module->getFactory();
     const auto classes = factory.classInfos();
     const auto selected = std::find_if(classes.begin(), classes.end(), [](const auto& info) {
-        return info.category() == Steinberg::Vst::kVstAudioEffectClass;
+        return info.category() == kVstAudioEffectClass;
     });
     if (selected == classes.end()) {
         error = "The VST3 module contains no audio-effect class: " + impl_->path;

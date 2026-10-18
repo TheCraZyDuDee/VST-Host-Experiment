@@ -4,7 +4,7 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 
 ## Current status
 
-**Prototype 0.2:** a first PipeWire pass-through engine with a fixed gain processor. Plugin loading, a GUI, device enumeration, and runtime gain controls are not implemented yet. This prototype has not yet been built or tested against a live PipeWire session in this development environment.
+**Prototype 0.3 development:** the PipeWire pass-through now routes audio through a format-neutral processor interface, currently implemented by a gain/bypass processor. Native VST3 loading, a GUI, device enumeration, and runtime parameter controls are not implemented yet. The PipeWire path has been tested manually on a Linux desktop; CI covers compilation and unit tests.
 
 ## Goals
 

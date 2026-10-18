@@ -230,6 +230,11 @@ private:
     }
 
     void openEditor() {
+        if (editorDialog_) {
+            editorDialog_->raise();
+            editorDialog_->activateWindow();
+            return;
+        }
         if (QGuiApplication::platformName() != QStringLiteral("xcb")) {
             QMessageBox::information(
                 this, tr("X11 editor embedding required"),

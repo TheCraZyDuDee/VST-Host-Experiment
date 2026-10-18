@@ -101,7 +101,7 @@ bool Vst3Processor::load(std::string& error) {
         return false;
     }
 
-    impl_->component = impl_->provider->getComponent();
+    impl_->component = Steinberg::owned(impl_->provider->getComponent());
     if (!impl_->component) {
         error = "The VST3 plug-in did not provide an audio component.";
         impl_->provider = nullptr;

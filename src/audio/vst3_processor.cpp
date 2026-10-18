@@ -185,16 +185,47 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
         }
     }
 
-    Steinberg::Vst::SpeakerArrangement input_arrangement =
-        Steinberg::Vst::SpeakerArr::kStereo;
-    Steinberg::Vst::SpeakerArrangement output_arrangement =
-        Steinberg::Vst::SpeakerArr::kStereo;
+    // VST3 requires one arrangement entry for every audio bus, including
+    // auxiliary/sidechain buses. Preserve the current layout of auxiliary
+    // buses and request stereo for the main buses used by this host.
+    std::vector<Steinberg::Vst::SpeakerArrangement> input_arrangements(
+        static_cast<std::size_t>(input_count));
+    std::vector<Steinberg::Vst::SpeakerArrangement> output_arrangements(
+        static_cast<std::size_t>(output_count));
+
+    for (Steinberg::int32 i = 0; i < input_count; ++i) {
+        auto& arrangement = input_arrangements[static_cast<std::size_t>(i)];
+        const auto result = impl_->processor->getBusArrangement(
+            Steinberg::Vst::kInput, i, arrangement);
+        if (result != Steinberg::kResultOk) {
+            std::fprintf(stderr,
+                         "VST3: getBusArrangement(input, %d) failed (result=%d).\\n",
+                         i, static_cast<int>(result));
+            return false;
+        }
+    }
+    for (Steinberg::int32 i = 0; i < output_count; ++i) {
+        auto& arrangement = output_arrangements[static_cast<std::size_t>(i)];
+        const auto result = impl_->processor->getBusArrangement(
+            Steinberg::Vst::kOutput, i, arrangement);
+        if (result != Steinberg::kResultOk) {
+            std::fprintf(stderr,
+                         "VST3: getBusArrangement(output, %d) failed (result=%d).\\n",
+                         i, static_cast<int>(result));
+            return false;
+        }
+    }
+
+    input_arrangements[0] = Steinberg::Vst::SpeakerArr::kStereo;
+    output_arrangements[0] = Steinberg::Vst::SpeakerArr::kStereo;
     const auto arrangement_result = impl_->processor->setBusArrangements(
-        &input_arrangement, 1, &output_arrangement, 1);
+        input_arrangements.data(), input_count,
+        output_arrangements.data(), output_count);
     if (arrangement_result != Steinberg::kResultOk) {
         std::fprintf(stderr,
-                     "VST3: plugin rejected stereo main input/output bus arrangement (result=%d).\n",
-                     static_cast<int>(arrangement_result));
+                     "VST3: plugin rejected stereo main input/output bus arrangement "
+                     "(inputs=%d, outputs=%d, result=%d).\\n",
+                     input_count, output_count, static_cast<int>(arrangement_result));
         return false;
     }
 

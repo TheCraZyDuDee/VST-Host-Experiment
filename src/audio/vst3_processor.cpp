@@ -199,7 +199,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
             Steinberg::Vst::kInput, i, arrangement);
         if (result != Steinberg::kResultOk) {
             std::fprintf(stderr,
-                         "VST3: getBusArrangement(input, %d) failed (result=%d).\\n",
+                         "VST3: getBusArrangement(input, %d) failed (result=%d).\n",
                          i, static_cast<int>(result));
             return false;
         }
@@ -210,7 +210,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
             Steinberg::Vst::kOutput, i, arrangement);
         if (result != Steinberg::kResultOk) {
             std::fprintf(stderr,
-                         "VST3: getBusArrangement(output, %d) failed (result=%d).\\n",
+                         "VST3: getBusArrangement(output, %d) failed (result=%d).\n",
                          i, static_cast<int>(result));
             return false;
         }
@@ -224,7 +224,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
     if (arrangement_result != Steinberg::kResultOk) {
         std::fprintf(stderr,
                      "VST3: plugin rejected stereo main input/output bus arrangement "
-                     "(inputs=%d, outputs=%d, result=%d).\\n",
+                     "(inputs=%d, outputs=%d, result=%d).\n",
                      input_count, output_count, static_cast<int>(arrangement_result));
         return false;
     }

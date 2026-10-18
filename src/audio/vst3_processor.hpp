@@ -18,6 +18,8 @@ public:
     Vst3Processor& operator=(const Vst3Processor&) = delete;
 
     bool load(std::string& error);
+    bool open_editor(void* native_parent, int& width, int& height, std::string& error);
+    void close_editor() noexcept;
     bool prepare(const AudioProcessSpec& spec) override;
     void process(float* interleaved_samples, std::size_t frames) noexcept override;
     void reset() noexcept override;

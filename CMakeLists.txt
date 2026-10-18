@@ -13,30 +13,55 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 
-set(VST3_SDK_ROOT "" CACHE PATH "Path to a recursively cloned Steinberg VST3 SDK (optional)")
-if(VST3_SDK_ROOT)
+option(VST_HOST_ENABLE_VST3 "Enable native VST3 hosting (fetch the SDK automatically if needed)" OFF)
+set(VST3_SDK_ROOT "" CACHE PATH "Optional path to an existing Steinberg VST3 SDK checkout")
+
+if(VST_HOST_ENABLE_VST3 OR VST3_SDK_ROOT)
     if(CMAKE_VERSION VERSION_LESS 3.25)
-        message(FATAL_ERROR "The VST3 SDK requires CMake 3.25 or newer. Install a newer CMake or leave VST3_SDK_ROOT empty.")
-    endif()
-    if(NOT EXISTS "${VST3_SDK_ROOT}/CMakeLists.txt")
-        message(FATAL_ERROR "VST3_SDK_ROOT must point to the root of the Steinberg vst3sdk checkout.")
+        message(FATAL_ERROR "VST3 hosting requires CMake 3.25 or newer. Upgrade CMake or disable VST3 hosting.")
     endif()
 
-    # The SDK's examples and VSTGUI are not needed by this headless host.
-    set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
-    set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
-    add_subdirectory("${VST3_SDK_ROOT}" "${CMAKE_BINARY_DIR}/vst3sdk" EXCLUDE_FROM_ALL)
-    if(NOT TARGET sdk_hosting)
-        message(FATAL_ERROR "The selected VST3 SDK did not define sdk_hosting. Ensure the SDK checkout includes its recursive submodules.")
+    if(VST3_SDK_ROOT)
+        if(NOT EXISTS "${VST3_SDK_ROOT}/CMakeLists.txt")
+            message(FATAL_ERROR "VST3_SDK_ROOT must point to the root of the Steinberg vst3sdk checkout.")
+        endif()
+        set(_vst3_sdk_source "${VST3_SDK_ROOT}")
+        message(STATUS "Using existing VST3 SDK at: ${_vst3_sdk_source}")
+        set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+        add_subdirectory("${_vst3_sdk_source}" "${CMAKE_BINARY_DIR}/vst3sdk" EXCLUDE_FROM_ALL)
+    else()
+        include(FetchContent)
+
+        # Pin the SDK revision so clean builds remain reproducible. Only the
+        # core SDK submodules are fetched; VSTGUI is not needed by this host.
+        set(SMTG_ENABLE_VST3_PLUGIN_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SMTG_ENABLE_VST3_HOSTING_EXAMPLES OFF CACHE BOOL "" FORCE)
+        set(SMTG_ENABLE_VSTGUI_SUPPORT OFF CACHE BOOL "" FORCE)
+
+        FetchContent_Declare(vst3sdk
+            GIT_REPOSITORY https://github.com/steinbergmedia/vst3sdk.git
+            GIT_TAG v3.8.0_build_66
+            GIT_SHALLOW TRUE
+            GIT_SUBMODULES base pluginterfaces public.sdk cmake
+            GIT_SUBMODULES_RECURSE TRUE
+        )
+        FetchContent_MakeAvailable(vst3sdk)
+        set(_vst3_sdk_source "${vst3sdk_SOURCE_DIR}")
     endif()
-    # PlugProvider is a host helper used by the SDK samples but is not part of
-    # sdk_hosting in every SDK revision, so compile it into the host target.
-    target_sources(sdk_hosting PRIVATE "${VST3_SDK_ROOT}/public.sdk/source/vst/hosting/plugprovider.cpp")
+
+    if(NOT TARGET sdk_hosting)
+        message(FATAL_ERROR "The selected VST3 SDK did not define sdk_hosting. Check that its required submodules were fetched.")
+    endif()
+
+    # PlugProvider is a hosting helper used by SDK samples but is not part of
+    # sdk_hosting in this SDK revision, so compile it into the hosting target.
+    target_sources(sdk_hosting PRIVATE "${_vst3_sdk_source}/public.sdk/source/vst/hosting/plugprovider.cpp")
     set(VST_HOST_HAVE_VST3 ON)
 else()
     set(VST_HOST_HAVE_VST3 OFF)
-    message(STATUS "VST3 support disabled. Set VST3_SDK_ROOT to enable --plugin.")
+    message(STATUS "VST3 support disabled. Set -DVST_HOST_ENABLE_VST3=ON to fetch and build the SDK automatically.")
 endif()
 
 add_executable(vst-host

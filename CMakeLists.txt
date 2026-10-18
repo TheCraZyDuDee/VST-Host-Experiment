@@ -21,6 +21,13 @@ add_executable(vst-host
 target_compile_features(vst-host PRIVATE cxx_std_20)
 target_link_libraries(vst-host PRIVATE PkgConfig::PIPEWIRE)
 
+include(CTest)
+if(BUILD_TESTING)
+    add_executable(ring-buffer-test tests/ring_buffer_test.cpp)
+    target_compile_features(ring-buffer-test PRIVATE cxx_std_20)
+    add_test(NAME ring-buffer-test COMMAND ring-buffer-test)
+endif()
+
 if(MSVC)
     target_compile_options(vst-host PRIVATE /W4 /permissive-)
 else()

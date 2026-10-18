@@ -4,7 +4,7 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 
 ## Current status
 
-**Prototype 0.3 development:** the PipeWire pass-through now routes audio through a format-neutral processor interface, currently implemented by a gain/bypass processor. Native VST3 loading, a GUI, device enumeration, and runtime parameter controls are not implemented yet. The PipeWire path has been tested manually on a Linux desktop; CI covers compilation and unit tests.
+**Prototype 0.4 development:** the PipeWire path now supports an optional single native Linux VST3 audio effect, behind the format-neutral processor interface. The default build remains SDK-free. The VST3 path is an initial integration and still needs a real plugin build/load/process test on Linux. A GUI, device enumeration, multi-plugin chains, plugin state, and runtime parameter controls are not implemented yet.
 
 ## Goals
 
@@ -26,7 +26,7 @@ The real-time path uses a bounded single-producer/single-consumer ring buffer be
 
 ## Build
 
-Requirements: CMake 3.20+, a C++20 compiler, PipeWire development headers and pkg-config.
+Requirements for the default build: CMake 3.20+, a C++20 compiler, PipeWire development headers and pkg-config. To enable VST3 hosting, install CMake 3.25+ and clone the Steinberg SDK with its submodules.
 
 On Debian/Ubuntu, the relevant packages are typically:
 
@@ -43,13 +43,30 @@ cmake --build build
 ./build/vst-host
 ```
 
+To enable VST3 hosting, clone the SDK recursively and pass its directory at configure time:
+
+```sh
+git clone --recursive https://github.com/steinbergmedia/vst3sdk.git ~/src/vst3sdk
+cmake -S . -B build-vst3 -DVST3_SDK_ROOT=$HOME/src/vst3sdk
+cmake --build build-vst3
+```
+
+The SDK is optional and is not downloaded automatically. Its license and usage notes are available in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
+```
+
 The application must run inside a logged-in desktop/user session with PipeWire available. By default it asks PipeWire to connect to the default microphone. To target a specific PipeWire node:
 
 ```sh
 ./build/vst-host --input NODE_ID_OR_NAME --name vst-host-mic --gain 1.0
 ```
 
-Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. `--latency-frames 128` is the default and requests a 128-frame PipeWire interval (about 2.67 ms at 48 kHz). If you hear dropouts, try `256` (5.33 ms), `512` (10.67 ms), or `1024` (21.33 ms). On shutdown, the host reports dropped and underrun frame counts as a basic troubleshooting diagnostic. This is a request, not a guarantee: actual latency depends on the PipeWire graph and the receiving application. The host also discards stale queued audio if the virtual microphone was suspended, rather than replaying a large backlog. Gain and latency are set at startup, not changed interactively. Stop with Ctrl+C.
+Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, `--plugin /path/to/Effect.vst3` loads one native Linux VST3 audio effect before the gain stage. For example:
+
+```sh
+./build-vst3/vst-host --input NODE_ID_OR_NAME --plugin /path/to/Effect.vst3 --name vst-host-mic
+```
+
+The first integration supports the plug-in’s first stereo audio input/output bus only. `--latency-frames 128` is the default and requests a 128-frame PipeWire interval (about 2.67 ms at 48 kHz). If you hear dropouts, try `256` (5.33 ms), `512` (10.67 ms), or `1024` (21.33 ms). On shutdown, the host reports dropped and underrun frame counts as a basic troubleshooting diagnostic. This is a request, not a guarantee: actual latency depends on the PipeWire graph and the receiving application. The host also discards stale queued audio if the virtual microphone was suspended, rather than replaying a large backlog. Gain and latency are set at startup, not changed interactively. Stop with Ctrl+C.
 
 The output source is intended to appear in applications' microphone/input-device lists as **VST Host Virtual Microphone** (or the name supplied with `--name`). This needs verification on the target distribution and PipeWire version; if the node is exposed as an application stream instead of a selectable source, the virtual-source publication strategy will need adjustment.
 
@@ -57,7 +74,7 @@ The output source is intended to appear in applications' microphone/input-device
 
 - No device picker yet; `--input` accepts a PipeWire target id/name, and the default source is used otherwise.
 - Stereo F32 input is requested at 48 kHz. Compatibility with mono-only devices and other negotiated formats still needs testing.
-- No plugin hosting, chain editor, meters, persistence, or GUI yet.
+- Multi-plugin chains, plug-in state persistence, plug-in editor UI, parameter controls, meters, and GUI are not implemented. The initial VST3 path has not yet been validated against a real third-party effect on the target Linux system.
 - The prototype has not been compiled or measured on a real PipeWire system, so latency, CPU use, and device compatibility are not yet established.
 
 See [architecture notes](docs/architecture.md) and [roadmap](docs/roadmap.md).

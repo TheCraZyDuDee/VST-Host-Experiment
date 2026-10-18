@@ -16,6 +16,7 @@ pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 add_executable(vst-host
     src/main.cpp
     src/audio/pipewire_engine.cpp
+    src/audio/gain_processor.cpp
 )
 
 target_compile_features(vst-host PRIVATE cxx_std_20)
@@ -27,6 +28,11 @@ if(BUILD_TESTING)
     target_include_directories(ring-buffer-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(ring-buffer-test PRIVATE cxx_std_20)
     add_test(NAME ring-buffer-test COMMAND ring-buffer-test)
+
+    add_executable(audio-processor-test tests/audio_processor_test.cpp src/audio/gain_processor.cpp)
+    target_include_directories(audio-processor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(audio-processor-test PRIVATE cxx_std_20)
+    add_test(NAME audio-processor-test COMMAND audio-processor-test)
 endif()
 
 if(MSVC)

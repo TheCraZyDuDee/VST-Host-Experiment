@@ -11,6 +11,7 @@ struct PipeWireOptions {
     std::string input_target;
     std::string output_name{"vst-host-virtual-mic"};
     std::string output_description{"VST Host Virtual Microphone"};
+    std::string plugin_path;
     float gain{1.0F};
     std::uint32_t latency_frames{128};
     bool bypass{false};

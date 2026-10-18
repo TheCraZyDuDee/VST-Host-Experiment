@@ -16,13 +16,13 @@
 - [ ] Add a status/diagnostics path for buffer statistics.
 
 ## Phase 2 — Processing graph
-- [ ] Define a real-time-safe processor interface.
+- [x] Define a real-time-safe processor interface and route the gain stage through it.
 - [ ] Support runtime gain/bypass changes using bounded real-time-safe control transfer.
 - [ ] Add chain ordering, channel-layout checks, and latency reporting.
 - [ ] Add persistence for device and graph settings.
 
 ## Phase 3 — Native plugins
-- [ ] Evaluate VST3 hosting libraries/SDK integration and licensing.
+- [ ] Evaluate VST3 hosting libraries/SDK integration and licensing, including the Steinberg SDK terms and dependency strategy.
 - [ ] Discover and load a native Linux VST3 plugin.
 - [ ] Handle plugin state, bypass, failures, and sample-rate/block-size changes.
 - [ ] Evaluate VST2 support and distribution implications separately.

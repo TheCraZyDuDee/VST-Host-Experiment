@@ -347,7 +347,7 @@ int PipeWireEngine::run() {
         }
         std::string plugin_error;
         if (!plugin->load(plugin_error)) {
-            std::fprintf(stderr, "Could not load VST3 plugin: %s\\n", plugin_error.c_str());
+            std::fprintf(stderr, "Could not load VST3 plugin: %s\n", plugin_error.c_str());
             return -EINVAL;
         }
         impl_->state.plugin_processor = std::move(plugin);

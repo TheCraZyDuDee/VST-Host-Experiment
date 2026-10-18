@@ -1,0 +1,32 @@
+#pragma once
+
+#include <string>
+
+namespace vst_host::audio {
+
+struct PipeWireOptions {
+    // Optional PipeWire node id/name for the microphone. If empty, the default
+    // source is selected through PipeWire's autoconnect behavior.
+    std::string input_target;
+    std::string output_name{"vst-host-virtual-mic"};
+    std::string output_description{"VST Host Virtual Microphone"};
+    float gain{1.0F};
+    bool bypass{false};
+};
+
+class PipeWireEngine {
+public:
+    explicit PipeWireEngine(PipeWireOptions options);
+    PipeWireEngine(const PipeWireEngine&) = delete;
+    PipeWireEngine& operator=(const PipeWireEngine&) = delete;
+    ~PipeWireEngine();
+
+    // Blocks until SIGINT/SIGTERM or an internal setup failure.
+    int run();
+
+private:
+    struct Impl;
+    Impl* impl_;
+};
+
+} // namespace vst_host::audio

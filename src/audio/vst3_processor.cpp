@@ -449,7 +449,7 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
     if (!arrangement_accepted) {
         std::fprintf(stderr,
                      "VST3: plugin rejected stereo and mono main bus arrangements "
-                     "(inputs=%d, outputs=%d, result=%d).\\n",
+                     "(inputs=%d, outputs=%d, result=%d).\n",
                      input_count, output_count, static_cast<int>(arrangement_result));
         return false;
     }

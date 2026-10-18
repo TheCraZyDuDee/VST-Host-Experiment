@@ -26,6 +26,71 @@ namespace Steinberg {
 FUnknown* gStandardPluginContext = new Vst::HostApplication();
 }
 
+namespace {
+
+class EditorComponentHandler final : public Steinberg::Vst::IComponentHandler {
+public:
+    explicit EditorComponentHandler(Steinberg::Vst::IEditController* controller)
+        : controller_(controller) {}
+
+    Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID id,
+                                               Steinberg::Vst::ParamValue value) override {
+        return controller_ ? controller_->setParamNormalized(id, value) : Steinberg::kResultFalse;
+    }
+    Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
+        return Steinberg::kResultOk;
+    }
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32) override {
+        return Steinberg::kResultOk;
+    }
+
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid,
+                                                 void** obj) override {
+        if (obj == nullptr) return Steinberg::kInvalidArgument;
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::Vst::IComponentHandler::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = this;
+            addRef();
+            return Steinberg::kResultOk;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+
+private:
+    Steinberg::Vst::IEditController* controller_{};
+};
+
+class EditorFrame final : public Steinberg::IPlugFrame {
+public:
+    Steinberg::tresult PLUGIN_API resizeView(Steinberg::IPlugView*,
+                                              Steinberg::ViewRect*) override {
+        return Steinberg::kNotImplemented;
+    }
+
+    Steinberg::tresult PLUGIN_API queryInterface(const Steinberg::TUID iid,
+                                                  void** obj) override {
+        if (obj == nullptr) return Steinberg::kInvalidArgument;
+        if (Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::IPlugFrame::iid) ||
+            Steinberg::FUnknownPrivate::iidEqual(iid, Steinberg::FUnknown::iid)) {
+            *obj = this;
+            addRef();
+            return Steinberg::kResultOk;
+        }
+        *obj = nullptr;
+        return Steinberg::kNoInterface;
+    }
+    Steinberg::uint32 PLUGIN_API addRef() override { return 1; }
+    Steinberg::uint32 PLUGIN_API release() override { return 1; }
+};
+
+} // namespace
+
 #endif
 
 namespace vst_host::audio {

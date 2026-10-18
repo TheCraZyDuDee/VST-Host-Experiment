@@ -7,6 +7,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDoubleSpinBox>
+#include <QElapsedTimer>
 #include <QFileDialog>
 #include <QFormLayout>
 #include <QGuiApplication>
@@ -26,6 +27,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <thread>
 #include <algorithm>
@@ -39,8 +41,24 @@ public:
         display_ = XOpenDisplay(nullptr);
         if (!display_) {
             error_ = "Could not open the X11 display for the VST3 editor host.";
+            std::fprintf(stderr, "[VST3 XEmbed] XOpenDisplay failed (DISPLAY=%s).\\n",
+                         std::getenv("DISPLAY") ? std::getenv("DISPLAY") : "<unset>");
             return;
         }
+        std::fprintf(stderr, "[VST3 XEmbed] Connected to display '%s'; Qt parent=0x%llx.\\n",
+                     DisplayString(display_),
+                     static_cast<unsigned long long>(qtParent));
+        XWindowAttributes parentAttributes{};
+        if (!XGetWindowAttributes(display_, qtParent, &parentAttributes)) {
+            error_ = "The Qt editor container is not a valid X11 window on this display.";
+            std::fprintf(stderr, "[VST3 XEmbed] ERROR: Qt parent window is not valid on this X11 display.\\n");
+            XCloseDisplay(display_);
+            display_ = nullptr;
+            return;
+        }
+        std::fprintf(stderr, "[VST3 XEmbed] Qt parent geometry=%dx%d at (%d,%d).\\n",
+                     parentAttributes.width, parentAttributes.height,
+                     parentAttributes.x, parentAttributes.y);
         XSetWindowAttributes attributes{};
         attributes.override_redirect = True;
         window_ = XCreateWindow(display_, qtParent, 0, 0, 320, 180, 0, CopyFromParent,
@@ -53,6 +71,8 @@ public:
         }
         XSelectInput(display_, window_, StructureNotifyMask | SubstructureNotifyMask |
                                          PropertyChangeMask | FocusChangeMask | ExposureMask);
+        std::fprintf(stderr, "[VST3 XEmbed] Created and selected events on container=0x%llx.\\n",
+                     static_cast<unsigned long long>(window_));
         xembedAtom_ = XInternAtom(display_, "_XEMBED", False);
         xembedInfoAtom_ = XInternAtom(display_, "_XEMBED_INFO", False);
         XMapWindow(display_, window_);
@@ -77,6 +97,14 @@ public:
     bool valid() const { return display_ != nullptr && window_ != 0; }
     Window window() const { return window_; }
     const std::string& error() const { return error_; }
+
+    void editorAttached() {
+        editorAttached_ = true;
+        attachTimer_.restart();
+        noChildWarningPrinted_ = false;
+        std::fprintf(stderr,
+                     "[VST3 XEmbed] VST3 attached() returned success; waiting for plugin child-window creation.\\n");
+    }
 
     void resizeTo(int width, int height) {
         lastWidth_ = std::max(1, width);
@@ -106,8 +134,7 @@ private:
         message.xclient.data.l[3] = static_cast<long>(window_);
         message.xclient.data.l[4] = embedVersion_;
         XSendEvent(display_, child, False, NoEventMask, &message);
-        sendXEmbedMessage(child, 1); // XEMBED_WINDOW_ACTIVATE
-        sendXEmbedMessage(child, 4); // XEMBED_FOCUS_IN
+        XFlush(display_);
     }
 
     void sendXEmbedMessage(Window child, long opcode) {
@@ -135,22 +162,35 @@ private:
                 if (event.xcreatewindow.parent == window_) {
                     const Window child = event.xcreatewindow.window;
                     children_.push_back(child);
+                    std::fprintf(stderr,
+                                 "[VST3 XEmbed] Plugin created child window=0x%llx (override_redirect=%d).\\n",
+                                 static_cast<unsigned long long>(child),
+                                 event.xcreatewindow.override_redirect ? 1 : 0);
                     Atom actualType = None;
                     int actualFormat = 0;
                     unsigned long itemCount = 0;
                     unsigned long bytesAfter = 0;
                     unsigned char* property = nullptr;
-                    if (XGetWindowProperty(display_, child, xembedInfoAtom_, 0, 2, False,
-                                           xembedInfoAtom_, &actualType, &actualFormat,
-                                           &itemCount, &bytesAfter, &property) == Success &&
-                        property != nullptr && actualFormat == 32 && itemCount >= 1) {
+                    const auto propertyResult = XGetWindowProperty(
+                        display_, child, xembedInfoAtom_, 0, 2, False, xembedInfoAtom_,
+                        &actualType, &actualFormat, &itemCount, &bytesAfter, &property);
+                    if (propertyResult == Success && property != nullptr &&
+                        actualFormat == 32 && itemCount >= 2) {
                         const auto* values = reinterpret_cast<unsigned long*>(property);
                         embedVersion_ = static_cast<long>(values[0]);
-                        if (itemCount >= 2 && (values[1] & 1UL) != 0UL) {
-                            XFree(property);
-                            error_ = "The plugin editor window was already mapped before XEmbed negotiation.";
-                            break;
+                        const auto flags = values[1];
+                        std::fprintf(stderr,
+                                     "[VST3 XEmbed] _XEMBED_INFO version=%ld flags=0x%lx.\\n",
+                                     embedVersion_, flags);
+                        if ((flags & 1UL) != 0UL) {
+                            std::fprintf(stderr,
+                                         "[VST3 XEmbed] WARNING: child advertises itself as already mapped before embedding.\\n");
                         }
+                    } else {
+                        std::fprintf(stderr,
+                                     "[VST3 XEmbed] WARNING: _XEMBED_INFO unavailable or malformed (result=%d, type=%lu, format=%d, items=%lu).\\n",
+                                     propertyResult, static_cast<unsigned long>(actualType),
+                                     actualFormat, itemCount);
                     }
                     if (property != nullptr) XFree(property);
                     sendEmbeddedNotify(child);
@@ -158,10 +198,34 @@ private:
                     XMoveResizeWindow(display_, child, 0, 0,
                                       static_cast<unsigned int>(lastWidth_),
                                       static_cast<unsigned int>(lastHeight_));
+                    XSync(display_, False);
+                    sendXEmbedMessage(child, 1); // XEMBED_WINDOW_ACTIVATE
+                    sendXEmbedMessage(child, 4); // XEMBED_FOCUS_IN
+                    XWindowAttributes childAttributes{};
+                    if (XGetWindowAttributes(display_, child, &childAttributes)) {
+                        std::fprintf(stderr,
+                                     "[VST3 XEmbed] Child after map: map_state=%d geometry=%dx%d.\\n",
+                                     childAttributes.map_state, childAttributes.width,
+                                     childAttributes.height);
+                    }
                 }
                 break;
             case MapRequest:
+                std::fprintf(stderr, "[VST3 XEmbed] MapRequest for window=0x%llx.\\n",
+                             static_cast<unsigned long long>(event.xmaprequest.window));
                 XMapWindow(display_, event.xmaprequest.window);
+                break;
+            case MapNotify:
+                if (std::find(children_.begin(), children_.end(), event.xmap.window) != children_.end()) {
+                    std::fprintf(stderr, "[VST3 XEmbed] Plugin child MapNotify window=0x%llx.\\n",
+                                 static_cast<unsigned long long>(event.xmap.window));
+                }
+                break;
+            case UnmapNotify:
+                if (std::find(children_.begin(), children_.end(), event.xunmap.window) != children_.end()) {
+                    std::fprintf(stderr, "[VST3 XEmbed] Plugin child UnmapNotify window=0x%llx.\\n",
+                                 static_cast<unsigned long long>(event.xunmap.window));
+                }
                 break;
             case ConfigureRequest: {
                 const auto& request = event.xconfigurerequest;
@@ -190,6 +254,12 @@ private:
                 break;
             }
         }
+        if (editorAttached_ && children_.empty() && !noChildWarningPrinted_ &&
+            attachTimer_.isValid() && attachTimer_.elapsed() >= 2000) {
+            noChildWarningPrinted_ = true;
+            std::fprintf(stderr,
+                         "[VST3 XEmbed] DIAGNOSTIC: no plugin child X11 window appeared within 2 seconds of attached() success. The plugin created a VST3 view, but did not create an embeddable X11 child window.\\n");
+        }
         XFlush(display_);
     }
 
@@ -203,6 +273,9 @@ private:
     int lastHeight_{180};
     std::vector<Window> children_;
     std::string error_;
+    QElapsedTimer attachTimer_;
+    bool editorAttached_{false};
+    bool noChildWarningPrinted_{false};
 };
 
 class PluginEditorDialog final : public QDialog {
@@ -249,6 +322,7 @@ public:
             return false;
         }
         attached_ = true;
+        xembed_->editorAttached();
         surface_->setMinimumSize(width, height);
         surface_->resize(width, height);
         xembed_->resizeTo(width, height);

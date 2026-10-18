@@ -7,6 +7,7 @@
 #include <pipewire/pipewire.h>
 
 #include <algorithm>
+#include <atomic>
 #include <spa/param/audio/format-utils.h>
 
 #include <cerrno>
@@ -156,6 +157,8 @@ struct PipeWireEngine::Impl {
     spa_hook capture_listener{};
     spa_hook source_listener{};
     bool initialized{false};
+    std::atomic<pw_main_loop*> published_loop{nullptr};
+    std::atomic<Vst3Processor*> published_plugin{nullptr};
 
     int create_source_stream() {
         const auto latency = std::to_string(options.latency_frames) + "/48000";

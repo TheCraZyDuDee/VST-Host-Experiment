@@ -3,6 +3,8 @@
 #include "stereo_ring_buffer.hpp"
 
 #include <pipewire/pipewire.h>
+
+#include <algorithm>
 #include <spa/param/audio/format-utils.h>
 
 #include <cerrno>
@@ -85,7 +87,10 @@ void on_source_process(void* userdata) {
         spa_buffer->datas[0].data != nullptr &&
         spa_buffer->datas[0].chunk != nullptr) {
         auto& data = spa_buffer->datas[0];
-        const auto frames = static_cast<std::size_t>(data.maxsize) / frame_bytes;
+        auto frames = static_cast<std::size_t>(data.maxsize) / frame_bytes;
+        if (buffer->requested > 0) {
+            frames = std::min(frames, static_cast<std::size_t>(buffer->requested));
+        }
         auto* samples = reinterpret_cast<float*>(data.data);
 
         state->ring.pop_interleaved(samples, frames);

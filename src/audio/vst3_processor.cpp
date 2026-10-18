@@ -239,12 +239,16 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
         return false;
     }
     const auto processing_result = impl_->processor->setProcessing(true);
-    if (processing_result != Steinberg::kResultOk) {
+    if (processing_result != Steinberg::kResultOk &&
+        processing_result != Steinberg::kNotImplemented) {
         std::fprintf(stderr, "VST3: processor setProcessing(true) failed (result=%d).\n",
                      static_cast<int>(processing_result));
         impl_->component->setActive(false);
         return false;
     }
+    // Some plug-ins inherit the SDK's default implementation, which returns
+    // kNotImplemented. Treat that as an unsupported optional transition rather
+    // than rejecting the plug-in; process() remains the definitive test.
     impl_->latency = impl_->processor->getLatencySamples();
     impl_->project_time_samples = 0;
     return true;

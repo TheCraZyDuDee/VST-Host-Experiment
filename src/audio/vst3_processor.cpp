@@ -34,7 +34,7 @@ struct Vst3Processor::Impl {
     std::uint32_t latency{0};
 
 #if defined(VST_HOST_ENABLE_VST3)
-    std::shared_ptr<Steinberg::VST3::Hosting::Module> module;
+    std::shared_ptr<VST3::Hosting::Module> module;
     Steinberg::IPtr<Steinberg::Vst::PlugProvider> provider;
     Steinberg::IPtr<Steinberg::Vst::IComponent> component;
     Steinberg::IPtr<Steinberg::Vst::IAudioProcessor> processor;
@@ -76,7 +76,7 @@ bool Vst3Processor::load(std::string& error) {
         return true;
     }
 
-    impl_->module = Steinberg::VST3::Hosting::Module::create(impl_->path, error);
+    impl_->module = VST3::Hosting::Module::create(impl_->path, error);
     if (!impl_->module) {
         error = "Could not load VST3 module '" + impl_->path + "': " + error;
         return false;

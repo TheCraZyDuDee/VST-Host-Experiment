@@ -14,6 +14,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 
 option(VST_HOST_ENABLE_VST3 "Enable native VST3 hosting (fetch the SDK automatically if needed)" OFF)
+option(VST_HOST_BUILD_GUI "Build the optional Qt 6 GUI (requires VST3 hosting)" OFF)
 set(VST3_SDK_ROOT "" CACHE PATH "Optional path to an existing Steinberg VST3 SDK checkout")
 
 if(VST_HOST_ENABLE_VST3 OR VST3_SDK_ROOT)

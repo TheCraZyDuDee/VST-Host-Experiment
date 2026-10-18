@@ -4,7 +4,7 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 
 ## Current status
 
-**Prototype 0.4 development:** the PipeWire path now supports an optional single native Linux VST3 audio effect, behind the format-neutral processor interface. The default build remains SDK-free. The VST3 path is an initial integration and still needs a real plugin build/load/process test on Linux. A GUI, device enumeration, multi-plugin chains, plugin state, and runtime parameter controls are not implemented yet.
+**Prototype 0.5 development:** the command-line host supports an optional native Linux VST3 effect. An optional Qt 6 frontend adds plugin bundle selection, input-target configuration, start/stop controls, and an embedded plugin editor on X11. The CLI and SDK-free build remain available independently. The GUI is an initial implementation; device enumeration, multi-plugin chains, state persistence, and Wayland-native editor embedding are not implemented yet.
 
 ## Goals
 
@@ -26,7 +26,7 @@ The real-time path uses a bounded single-producer/single-consumer ring buffer be
 
 ## Build
 
-Requirements for the default build: CMake 3.20+, a C++20 compiler, PipeWire development headers and pkg-config. Enabling VST3 hosting requires CMake 3.25+ and a network connection on the first configure unless you already have the SDK locally.
+Requirements for the default build: CMake 3.20+, a C++20 compiler, PipeWire development headers and pkg-config. Enabling VST3 hosting requires CMake 3.25+ and a network connection on the first configure unless you already have the SDK locally. The optional GUI additionally requires Qt 6 Widgets development files.
 
 On Debian/Ubuntu, the relevant packages are typically:
 
@@ -53,6 +53,17 @@ ctest --test-dir build-vst3 --output-on-failure
 
 For single-configuration generators such as Unix Makefiles, CMake defaults the VST3-enabled build to Release when no build type is specified, as required by the Steinberg SDK. You can still choose Debug explicitly with `-DCMAKE_BUILD_TYPE=Debug`.
 
+To build the optional Qt frontend (in addition to native VST3 support), install Qt 6 Widgets development files and configure with:
+
+```sh
+cmake -S . -B build-vst3-gui -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
+cmake --build build-vst3-gui
+./build-vst3-gui/vst-host-gui
+```
+
+The GUI lets you select a `.vst3` bundle directory, specify a PipeWire input node id/name (or leave it empty for the default microphone), configure gain and requested latency, and start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
+
+
 The first configure downloads the SDK and its required source submodules; later builds reuse them in the CMake build directory. VSTGUI and the SDK's example plugins are disabled because this headless host does not need them. To use an SDK checkout you already have instead, pass `-DVST3_SDK_ROOT=/path/to/vst3sdk` with `-DVST_HOST_ENABLE_VST3=ON`. VST3 hosting stays optional, so the normal build does not need a network connection or the SDK. The SDK is distributed under the terms in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
 
 The application must run inside a logged-in desktop/user session with PipeWire available. By default it asks PipeWire to connect to the default microphone. To target a specific PipeWire node:
@@ -75,7 +86,7 @@ The output source is intended to appear in applications' microphone/input-device
 
 - No device picker yet; `--input` accepts a PipeWire target id/name, and the default source is used otherwise.
 - Stereo F32 input is requested at 48 kHz. Compatibility with mono-only devices and other negotiated formats still needs testing.
-- Multi-plugin chains, plug-in state persistence, plug-in editor UI, parameter controls, meters, and GUI are not implemented. The initial VST3 path has not yet been validated against a real third-party effect on the target Linux system.
+- Multi-plugin chains, plug-in state persistence, generic parameter controls, meters, and device enumeration are not implemented. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.
 - The prototype has not been compiled or measured on a real PipeWire system, so latency, CPU use, and device compatibility are not yet established.
 
 See [architecture notes](docs/architecture.md) and [roadmap](docs/roadmap.md).

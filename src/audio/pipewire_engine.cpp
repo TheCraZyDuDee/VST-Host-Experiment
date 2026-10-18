@@ -1,6 +1,7 @@
 #include "pipewire_engine.hpp"
 
 #include "stereo_ring_buffer.hpp"
+#include "gain_processor.hpp"
 
 #include <pipewire/pipewire.h>
 
@@ -28,9 +29,8 @@ struct EngineState {
     pw_stream* capture_stream{};
     pw_stream* source_stream{};
     StereoRingBuffer ring;
-    float gain{1.0F};
-    std::size_t latency_frames{256};
-    bool bypass{false};
+    GainProcessor processor;
+    std::size_t latency_frames{128};
     int setup_error{0};
 };
 
@@ -96,11 +96,7 @@ void on_source_process(void* userdata) {
         auto* samples = reinterpret_cast<float*>(data.data);
 
         state->ring.pop_interleaved(samples, frames, state->latency_frames * 2);
-        if (!state->bypass && state->gain != 1.0F) {
-            for (std::size_t i = 0; i < frames * channel_count; ++i) {
-                samples[i] *= state->gain;
-            }
-        }
+        state->processor.process(samples, frames);
 
         data.chunk->offset = 0;
         data.chunk->stride = static_cast<int32_t>(frame_bytes);
@@ -144,9 +140,9 @@ const pw_stream_events source_events = [] {
 struct PipeWireEngine::Impl {
     explicit Impl(PipeWireOptions supplied_options)
         : options(std::move(supplied_options)) {
-        state.gain = options.gain;
+        state.processor.set_gain(options.gain);
+        state.processor.set_bypassed(options.bypass);
         state.latency_frames = options.latency_frames;
-        state.bypass = options.bypass;
     }
 
     PipeWireOptions options;
@@ -318,6 +314,12 @@ int PipeWireEngine::run() {
                        request_shutdown, &impl_->state);
     pw_loop_add_signal(pw_main_loop_get_loop(impl_->state.loop), SIGTERM,
                        request_shutdown, &impl_->state);
+
+    const AudioProcessSpec process_spec{sample_rate, channel_count, 1024};
+    if (!impl_->state.processor.prepare(process_spec)) {
+        std::fprintf(stderr, "Could not prepare audio processor.\\n");
+        return -EINVAL;
+    }
 
     auto result = impl_->create_source_stream();
     if (result == 0) {

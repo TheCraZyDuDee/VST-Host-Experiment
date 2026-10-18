@@ -33,7 +33,7 @@ struct EngineState {
     pw_stream* source_stream{};
     StereoRingBuffer ring;
     GainProcessor processor;
-    std::unique_ptr<Vst3Processor> plugin_processor;
+    std::shared_ptr<Vst3Processor> plugin_processor;
     std::size_t latency_frames{128};
     int setup_error{0};
 };

@@ -27,5 +27,18 @@ int main() {
     if (full.dropped_frames() != 1) {
         return 2;
     }
+
+    StereoRingBuffer interleaved;
+    const float stereo_input[] = {0.1F, -0.1F, 0.2F, -0.2F};
+    interleaved.push_interleaved(stereo_input, 2);
+    float stereo_output[6]{};
+    interleaved.pop_interleaved(stereo_output, 3);
+    if (stereo_output[0] != 0.1F || stereo_output[1] != -0.1F ||
+        stereo_output[2] != 0.2F || stereo_output[3] != -0.2F ||
+        stereo_output[4] != 0.0F || stereo_output[5] != 0.0F ||
+        interleaved.underrun_frames() != 1) {
+        return 3;
+    }
+
     return 0;
 }

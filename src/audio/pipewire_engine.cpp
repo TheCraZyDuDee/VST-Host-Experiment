@@ -11,6 +11,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <utility>
 
 namespace vst_host::audio {
@@ -28,6 +29,7 @@ struct EngineState {
     pw_stream* source_stream{};
     StereoRingBuffer ring;
     float gain{1.0F};
+    std::size_t latency_frames{256};
     bool bypass{false};
     int setup_error{0};
 };
@@ -93,7 +95,7 @@ void on_source_process(void* userdata) {
         }
         auto* samples = reinterpret_cast<float*>(data.data);
 
-        state->ring.pop_interleaved(samples, frames);
+        state->ring.pop_interleaved(samples, frames, state->latency_frames * 2);
         if (!state->bypass && state->gain != 1.0F) {
             for (std::size_t i = 0; i < frames * channel_count; ++i) {
                 samples[i] *= state->gain;
@@ -143,6 +145,7 @@ struct PipeWireEngine::Impl {
     explicit Impl(PipeWireOptions supplied_options)
         : options(std::move(supplied_options)) {
         state.gain = options.gain;
+        state.latency_frames = options.latency_frames;
         state.bypass = options.bypass;
     }
 
@@ -153,6 +156,7 @@ struct PipeWireEngine::Impl {
     bool initialized{false};
 
     int create_source_stream() {
+        const auto latency = std::to_string(options.latency_frames) + "/48000";
         auto* properties = pw_properties_new(
             PW_KEY_MEDIA_TYPE, "Audio",
             PW_KEY_MEDIA_CATEGORY, "Source",
@@ -162,6 +166,7 @@ struct PipeWireEngine::Impl {
             PW_KEY_MEDIA_CLASS, "Audio/Source",
             PW_KEY_NODE_NAME, options.output_name.c_str(),
             PW_KEY_NODE_DESCRIPTION, options.output_description.c_str(),
+            PW_KEY_NODE_LATENCY, latency.c_str(),
             PW_KEY_AUDIO_CHANNELS, "2",
             PW_KEY_NODE_VIRTUAL, "true",
             nullptr);
@@ -204,11 +209,13 @@ struct PipeWireEngine::Impl {
     }
 
     int create_capture_stream() {
+        const auto latency = std::to_string(options.latency_frames) + "/48000";
         auto* properties = pw_properties_new(
             PW_KEY_MEDIA_TYPE, "Audio",
             PW_KEY_MEDIA_CATEGORY, "Capture",
             PW_KEY_MEDIA_ROLE, "Communication",
             PW_KEY_NODE_DESCRIPTION, "VST Host Microphone Capture",
+            PW_KEY_NODE_LATENCY, latency.c_str(),
             nullptr);
         if (properties == nullptr) {
             return -ENOMEM;
@@ -323,6 +330,9 @@ int PipeWireEngine::run() {
                                                         : impl_->options.input_target.c_str());
         std::printf("Gain: %.3f%s\n", impl_->options.gain,
                     impl_->options.bypass ? " (bypassed)" : "");
+        std::printf("Requested latency: %zu frames (%.2f ms at 48 kHz)\n",
+                    impl_->options.latency_frames,
+                    1000.0 * static_cast<double>(impl_->options.latency_frames) / sample_rate);
         std::printf("Press Ctrl+C to stop.\n");
         pw_main_loop_run(impl_->state.loop);
         result = impl_->state.setup_error;

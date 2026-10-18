@@ -216,10 +216,12 @@ struct PipeWireEngine::Impl {
 
         std::uint8_t pod_buffer[1024];
         spa_pod_builder builder = SPA_POD_BUILDER_INIT(pod_buffer, sizeof(pod_buffer));
-        const spa_audio_info_raw format = SPA_AUDIO_INFO_RAW_INIT(
-            .format = SPA_AUDIO_FORMAT_F32,
-            .channels = channel_count,
-            .rate = sample_rate);
+        // Assign fields explicitly: SPA_AUDIO_INFO_RAW_INIT uses designated
+        // initializers whose declaration order differs across SPA header versions.
+        spa_audio_info_raw format{};
+        format.format = SPA_AUDIO_FORMAT_F32;
+        format.channels = channel_count;
+        format.rate = sample_rate;
         const spa_pod* params[1];
         params[0] = spa_format_audio_raw_build(&builder, SPA_PARAM_EnumFormat, &format);
 

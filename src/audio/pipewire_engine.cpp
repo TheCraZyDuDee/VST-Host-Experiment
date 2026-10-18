@@ -341,10 +341,13 @@ int PipeWireEngine::run() {
                        request_shutdown, &impl_->state);
 
     if (!impl_->options.plugin_path.empty()) {
-        auto plugin = std::make_unique<Vst3Processor>(impl_->options.plugin_path);
+        auto plugin = impl_->options.preloaded_plugin;
+        if (!plugin) {
+            plugin = std::make_shared<Vst3Processor>(impl_->options.plugin_path);
+        }
         std::string plugin_error;
         if (!plugin->load(plugin_error)) {
-            std::fprintf(stderr, "Could not load VST3 plugin: %s\n", plugin_error.c_str());
+            std::fprintf(stderr, "Could not load VST3 plugin: %s\\n", plugin_error.c_str());
             return -EINVAL;
         }
         impl_->state.plugin_processor = std::move(plugin);

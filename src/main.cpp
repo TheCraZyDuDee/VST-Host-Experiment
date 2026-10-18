@@ -29,7 +29,7 @@ bool parse_gain(std::string_view text, float& gain) {
     char* end = nullptr;
     errno = 0;
     const float parsed = std::strtof(owned.c_str(), &end);
-    if (errno != 0 || end == owned.c_str() || *end != '\\0' ||
+    if (errno != 0 || end == owned.c_str() || *end != '\0' ||
         !std::isfinite(parsed) || parsed < 0.0F || parsed > 4.0F) {
         return false;
     }

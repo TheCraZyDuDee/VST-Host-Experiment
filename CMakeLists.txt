@@ -91,6 +91,30 @@ if(VST_HOST_HAVE_VST3)
     target_link_libraries(vst-host PRIVATE sdk_hosting)
 endif()
 
+
+if(VST_HOST_BUILD_GUI)
+    if(NOT VST_HOST_HAVE_VST3)
+        message(FATAL_ERROR "VST_HOST_BUILD_GUI requires -DVST_HOST_ENABLE_VST3=ON.")
+    endif()
+
+    find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
+    add_executable(vst-host-gui
+        src/gui/main.cpp
+        src/audio/pipewire_engine.cpp
+        src/audio/gain_processor.cpp
+        src/audio/vst3_processor.cpp
+    )
+    target_include_directories(vst-host-gui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(vst-host-gui PRIVATE cxx_std_20)
+    target_compile_definitions(vst-host-gui PRIVATE VST_HOST_ENABLE_VST3=1)
+    target_link_libraries(vst-host-gui PRIVATE PkgConfig::PIPEWIRE Qt6::Widgets sdk_hosting)
+    if(MSVC)
+        target_compile_options(vst-host-gui PRIVATE /W4 /permissive-)
+    else()
+        target_compile_options(vst-host-gui PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+endif()
+
 include(CTest)
 if(BUILD_TESTING)
     add_executable(ring-buffer-test tests/ring_buffer_test.cpp)

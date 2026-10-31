@@ -58,7 +58,7 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
                 return false;
             }
             parsed.bypass = value == "true";
-        } else if (key == "input" || key == "output_name" || key == "plugin") {
+        } else if (key == "input" || key == "output_name" || key == "plugin" || key == "plugin_directory") {
             std::string value;
             if (!(value_stream >> std::quoted(value)) || value.empty()) {
                 error = "Expected a non-empty quoted string at line " + std::to_string(line_number);
@@ -73,7 +73,8 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
             else if (key == "output_name") {
                 parsed.output_name = value;
                 parsed.output_description = value;
-            } else parsed.plugin_paths.push_back(value);
+            } else if (key == "plugin") parsed.plugin_paths.push_back(value);
+            else parsed.plugin_directories.push_back(value);
         } else {
             error = "Unknown configuration key '" + key + "' at line " +
                     std::to_string(line_number);
@@ -105,6 +106,8 @@ inline bool save_config(const std::filesystem::path& path, const PipeWireOptions
                << "bypass = " << (options.bypass ? "true" : "false") << '\n';
         for (const auto& plugin : options.plugin_paths)
             output << "plugin = " << std::quoted(plugin) << '\n';
+        for (const auto& directory : options.plugin_directories)
+            output << "plugin_directory = " << std::quoted(directory) << '\n';
         if (!output) {
             error = "Failed while writing configuration file: " + temporary;
             return false;

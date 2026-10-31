@@ -534,7 +534,13 @@ private:
             return;
         }
         if (!engine_) return;
-        const int selectedIndex = chainList_->currentRow();\n        if (selectedIndex < 0) {\n            QMessageBox::information(this, tr("Select a plugin"), tr("Select a chain entry to open its editor."));\n            return;\n        }\n        auto* processor = engine_->plugin_processor(static_cast<std::size_t>(selectedIndex));
+        const int selectedIndex = chainList_->currentRow();
+        if (selectedIndex < 0) {
+            QMessageBox::information(this, tr("Select a plugin"),
+                                     tr("Select a chain entry to open its editor."));
+            return;
+        }
+        auto* processor = engine_->plugin_processor(static_cast<std::size_t>(selectedIndex));
         if (processor == nullptr) {
             QMessageBox::warning(this, tr("Plugin not ready"),
                                  tr("Wait for the plugin to finish loading, then try again."));
@@ -577,7 +583,11 @@ private:
         }
     }
 
-    QLineEdit* pluginPath_{};\n    QListWidget* chainList_{};\n    QPushButton* removePluginButton_{};\n    QPushButton* moveUpButton_{};\n    QPushButton* moveDownButton_{};
+    QLineEdit* pluginPath_{};
+    QListWidget* chainList_{};
+    QPushButton* removePluginButton_{};
+    QPushButton* moveUpButton_{};
+    QPushButton* moveDownButton_{};
     QLineEdit* inputTarget_{};
     QLineEdit* outputName_{};
     QDoubleSpinBox* gain_{};

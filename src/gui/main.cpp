@@ -19,6 +19,7 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSettings>
 #include <QPointer>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -444,10 +445,12 @@ public:
         pollTimer_ = new QTimer(this);
         pollTimer_->setInterval(200);
         connect(pollTimer_, &QTimer::timeout, this, [this] { pollEngine(); });
+        loadSettings();
         pollTimer_->start();
     }
 
     ~MainWindow() override {
+        saveSettings();
         stopAudio();
     }
 
@@ -458,6 +461,40 @@ protected:
     }
 
 private:
+    void loadSettings() {
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        settings.beginGroup(QStringLiteral("audio"));
+        const auto paths = settings.value(QStringLiteral("pluginChain")).toStringList();
+        for (const auto& path : paths) chainList_->addItem(path);
+        inputTarget_->setText(settings.value(QStringLiteral("inputTarget")).toString());
+        outputName_->setText(settings.value(QStringLiteral("outputName"),
+                                             QStringLiteral("vst-host-virtual-mic")).toString());
+        gain_->setValue(settings.value(QStringLiteral("gain"), 1.0).toDouble());
+        latency_->setCurrentText(settings.value(QStringLiteral("latencyFrames"),
+                                                QStringLiteral("128")).toString());
+        bypass_->setChecked(settings.value(QStringLiteral("gainBypassed"), false).toBool());
+        settings.endGroup();
+        if (chainList_->count() > 0) chainList_->setCurrentRow(0);
+    }
+
+    void saveSettings() const {
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        settings.beginGroup(QStringLiteral("audio"));
+        QStringList paths;
+        for (int i = 0; i < chainList_->count(); ++i)
+            paths.push_back(chainList_->item(i)->text());
+        settings.setValue(QStringLiteral("pluginChain"), paths);
+        settings.setValue(QStringLiteral("inputTarget"), inputTarget_->text());
+        settings.setValue(QStringLiteral("outputName"), outputName_->text());
+        settings.setValue(QStringLiteral("gain"), gain_->value());
+        settings.setValue(QStringLiteral("latencyFrames"), latency_->currentText());
+        settings.setValue(QStringLiteral("gainBypassed"), bypass_->isChecked());
+        settings.endGroup();
+        settings.sync();
+    }
+
     void moveSelectedPlugin(int offset) {
         const int row = chainList_->currentRow();
         const int target = row + offset;
@@ -469,6 +506,7 @@ private:
 
     void startAudio() {
         if (worker_.joinable()) worker_.join();
+        saveSettings();
         if (chainList_->count() == 0) {
             QMessageBox::warning(this, tr("Plugin chain is empty"),
                                  tr("Add at least one native Linux VST3 effect to the chain."));

@@ -4,7 +4,7 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 
 ## Current status
 
-**Prototype 0.6 development:** the command-line host supports optional native Linux VST3 effects in an ordered chain. The optional Qt 6 frontend provides chain editing, plugin editors on X11, and portable configuration import/export. The CLI can load the same configuration in headless mode without Qt. Device enumeration and Windows-plugin bridging remain in progress.
+**Prototype 0.7 development:** the command-line host supports ordered native Linux VST3 chains, portable configuration files, recursive plugin-directory scanning, and optional Windows VST3 discovery through Wine/yabridge. The optional Qt 6 frontend provides chain editing, PipeWire input selection, audio buffer diagnostics, and portable configuration import/export. The CLI can load the same configuration headlessly without Qt. Real-device audio validation and bridge crash isolation remain open.
 
 ## Goals
 
@@ -12,7 +12,7 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 - Support native Linux VST3 plugins first; evaluate VST2 support separately after checking SDK and distribution constraints.
 - Let users choose an input device, arrange a plugin chain, and select an output/virtual microphone.
 - Keep the audio engine independent from the user interface so a headless mode remains possible.
-- Treat Windows-only plugins as a later, optional compatibility project. Native Linux plugins come first.
+- Support Windows-only VST3 plugins as an optional Wine/yabridge compatibility path; native Linux plugins remain the simplest and lightest option.
 
 ## Technical direction
 
@@ -61,7 +61,7 @@ cmake --build build-vst3-gui
 ./build-vst3-gui/vst-host-gui
 ```
 
-The GUI lets you add individual `.vst3` bundles or add separate plugin search directories. Search directories can be scanned again; discovered bundles are added to the ordered chain and can be reordered or removed independently. The chain entries can be dragged to reorder them (or use the Move up/Move down controls), and the selected plugin's editor can be opened. It also provides Load configuration and Save configuration for portable `.vsthost` files. The chain and audio routing/gain/latency settings are additionally saved between launches using the desktop settings store. It enumerates available PipeWire capture sources at startup and offers a Refresh control plus editable manual node-name entry (leave empty for the default microphone). The selected source is saved by its PipeWire node name, while the displayed label includes its current node id. Configure gain and requested latency, then start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
+The GUI lets you add individual `.vst3` bundles or add separate native Linux plugin search directories and Windows VST3 directories (Wine/yabridge required for Windows plugins). Search directories can be scanned again; discovered bundles are added to the ordered chain and can be reordered or removed independently. The chain entries can be dragged to reorder them (or use the Move up/Move down controls), and the selected plugin's editor can be opened. It also provides Load configuration and Save configuration for portable `.vsthost` files. The chain and audio routing/gain/latency settings are additionally saved between launches using the desktop settings store. It enumerates available PipeWire capture sources at startup and offers a Refresh control plus editable manual node-name entry (leave empty for the default microphone). The selected source is saved by its PipeWire node name, while the displayed label includes its current node id. Configure gain and requested latency, then start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
 
 
 The first configure downloads the SDK and its required source submodules; later builds reuse them in the CMake build directory. VSTGUI and the SDK's example plugins are disabled because this headless host does not need them. To use an SDK checkout you already have instead, pass `-DVST3_SDK_ROOT=/path/to/vst3sdk` with `-DVST_HOST_ENABLE_VST3=ON`. VST3 hosting stays optional, so the normal build does not need a network connection or the SDK. The SDK is distributed under the terms in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).

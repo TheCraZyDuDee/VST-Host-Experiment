@@ -494,6 +494,8 @@ public:
         status_ = new QLabel(tr("Ready. Choose a plugin to begin."), central);
         status_->setWordWrap(true);
         root->addWidget(status_);
+        diagnostics_ = new QLabel(tr("Audio diagnostics: not running"), central);
+        root->addWidget(diagnostics_);
         auto* note = new QLabel(
             tr("Plugin editor embedding currently requires the Qt X11 (xcb) platform. "
                "Wayland-native editor embedding is not implemented yet."), central);
@@ -859,6 +861,10 @@ private:
                                         : tr("Audio engine exited with an error. See the terminal output for details.")));
             return;
         }
+        const auto stats = engine_->diagnostics();
+        diagnostics_->setText(tr("Buffer diagnostics — underrun: %1 frames; dropped: %2 frames")
+                                  .arg(static_cast<qulonglong>(stats.underrun_frames))
+                                  .arg(static_cast<qulonglong>(stats.dropped_frames)));
         if (engine_->plugin_processor() != nullptr) {
             while (static_cast<std::size_t>(chainList_->count()) < engine_->plugin_count()) {
                 const auto path = engine_->plugin_path(static_cast<std::size_t>(chainList_->count()));
@@ -887,6 +893,7 @@ private:
     QPushButton* stopButton_{};
     QPushButton* editorButton_{};
     QLabel* status_{};
+    QLabel* diagnostics_{};
     QTimer* pollTimer_{};
     std::unique_ptr<vst_host::audio::PipeWireEngine> engine_;
     std::thread worker_;

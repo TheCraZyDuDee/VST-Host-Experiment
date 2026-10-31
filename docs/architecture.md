@@ -64,3 +64,8 @@ When `windows_plugin_directories` is non-empty, `PipeWireEngine::run()` invokes 
 The Qt UI stores Windows plugin directories separately and lets the user start with only Windows plugin paths configured. Once the engine has loaded the chain, newly discovered wrapper paths are reflected in the chain list for editor access and future configuration saves. The CLI accepts repeated `--windows-plugin-dir PATH` arguments; `.vsthost` files use repeated `windows_plugin_directory` keys.
 
 The host does not install Wine or yabridge. `yabridgectl` must be available on `PATH`, at `~/.local/share/yabridge/yabridgectl`, or via the `YABRIDGECTL` environment variable. The host invokes yabridgectl as an external process without linking or vendoring its GPL-3.0-or-later implementation. `yabridgectl sync` operates on its global registered directory list, which may be shared with other audio hosts; this application does not automatically remove directories from that external list.
+
+
+## Runtime audio diagnostics
+
+The `StereoRingBuffer` tracks cumulative underrun and dropped-frame counts using relaxed atomic counters. `PipeWireEngine::diagnostics()` snapshots those counters without locking, and the Qt frontend polls them on its UI timer and displays the totals while the engine is running. The counters describe audio frames, not events; an underrun of 480 frames at 48 kHz represents 10 ms of missing input audio. They are diagnostic indicators rather than a substitute for a measured end-to-end latency test. The counters are cumulative for the lifetime of the engine instance and reset when a new engine is created.

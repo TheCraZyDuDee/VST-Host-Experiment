@@ -10,10 +10,10 @@
 ## Phase 1 — Audio routing proof of concept
 - [x] Add a capture stream and named virtual-source node.
 - [x] Add a fixed gain/bypass processing stage.
-- [ ] Verify microphone selection and source visibility on PipeWire/WirePlumber.
+- [ ] Verify microphone selection and source visibility on PipeWire/WirePlumber on target hardware.
 - [ ] Test mono microphones, channel negotiation, and device disconnect/reconnect.
 - [ ] Measure latency, CPU use, buffer underruns, and dropped frames.
-- [ ] Add a status/diagnostics path for buffer statistics.
+- [x] Expose lock-free ring-buffer underrun and dropped-frame counters to the GUI.
 
 ## Phase 2 — Processing graph
 - [x] Define a real-time-safe processor interface and route the gain stage through it.

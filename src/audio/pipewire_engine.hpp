@@ -10,6 +10,11 @@ namespace vst_host::audio {
 
 class Vst3Processor;
 
+struct AudioDiagnostics {
+    std::uint64_t dropped_frames{};
+    std::uint64_t underrun_frames{};
+};
+
 struct PipeWireOptions {
     // Optional PipeWire node id/name for the microphone. If empty, the default
     // source is selected through PipeWire's autoconnect behavior.
@@ -45,6 +50,7 @@ public:
     [[nodiscard]] std::size_t plugin_count() const noexcept;
     [[nodiscard]] std::string plugin_path(std::size_t index) const;
     [[nodiscard]] std::string last_error() const;
+    [[nodiscard]] AudioDiagnostics diagnostics() const noexcept;
 
 private:
     struct Impl;

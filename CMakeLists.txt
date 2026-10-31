@@ -153,6 +153,17 @@ if(BUILD_TESTING)
     target_include_directories(vst3-processor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(vst3-processor-test PRIVATE cxx_std_20)
     add_test(NAME vst3-processor-test COMMAND vst3-processor-test)
+
+    # CTest runs in Release on CI. Preserve assertions in test executables:
+    # many existing tests use assert() for both setup and verification.
+    if(NOT MSVC)
+        foreach(test_target IN ITEMS
+                ring-buffer-test audio-processor-test config-test
+                plugin-discovery-test yabridge-manager-test processor-chain-test
+                vst3-processor-test)
+            target_compile_options(${test_target} PRIVATE -UNDEBUG)
+        endforeach()
+    endif()
 endif()
 
 if(MSVC)

@@ -29,6 +29,14 @@ int main() {
     assert(restored.plugin_directories == source.plugin_directories);
     assert(restored.windows_plugin_directories == source.windows_plugin_directories);
 
+    // A blank input target means the default PipeWire microphone. GUI saves
+    // this commonly, so an empty value must round-trip successfully.
+    source.input_target.clear();
+    if (!vst_host::audio::save_config(path, source, error)) return 1;
+    restored.input_target = "not default";
+    if (!vst_host::audio::load_config(path, restored, error)) return 2;
+    if (!restored.input_target.empty()) return 3;
+
     std::filesystem::remove(path);
     return 0;
 }

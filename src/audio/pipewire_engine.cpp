@@ -329,6 +329,14 @@ std::string PipeWireEngine::last_error() const {
     return impl_ ? impl_->last_error : std::string{};
 }
 
+AudioDiagnostics PipeWireEngine::diagnostics() const noexcept {
+    if (!impl_) return {};
+    return AudioDiagnostics{
+        .dropped_frames = impl_->state.ring.dropped_frames(),
+        .underrun_frames = impl_->state.ring.underrun_frames(),
+    };
+}
+
 int PipeWireEngine::run() {
     std::string bridge_error;
     if (!prepare_windows_vst3_plugins(impl_->options, bridge_error)) {

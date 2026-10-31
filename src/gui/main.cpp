@@ -39,6 +39,7 @@
 #include <future>
 #include <thread>
 #include <algorithm>
+#include <chrono>
 #include <vector>
 
 namespace {
@@ -581,7 +582,7 @@ private:
         for (const auto& directory : options.plugin_directories)
             pluginDirectories_->addItem(QString::fromStdString(directory));
         scanPluginDirectories();
-        inputTarget_->setText(QString::fromStdString(options.input_target));
+        inputDevice_->setEditText(QString::fromStdString(options.input_target));
         outputName_->setText(QString::fromStdString(options.output_name));
         gain_->setValue(options.gain);
         latency_->setCurrentText(QString::number(options.latency_frames));

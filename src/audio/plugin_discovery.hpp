@@ -23,7 +23,8 @@ inline std::vector<std::string> discover_vst3_plugins(
         if (root.extension() == ".vst3") {
             discovered.push_back(root.lexically_normal().string());
             continue;
-        }\n        std::filesystem::recursive_directory_iterator it(
+        }
+        std::filesystem::recursive_directory_iterator it(
             root, std::filesystem::directory_options::skip_permission_denied, ec), end;
         if (ec && warning)
             *warning += "Could not scan plugin directory: " + directory + "\n";

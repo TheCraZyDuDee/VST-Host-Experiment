@@ -356,18 +356,23 @@ public:
         auto* layout = new QVBoxLayout(this);
         auto* selectorRow = new QHBoxLayout();
         selectorRow->addWidget(new QLabel(tr("Edit effect:"), this));
-        auto* selector = new QComboBox(this);
-        selector->addItems(effectNames);
-        selector->setCurrentIndex(selectedIndex);
-        selectorRow->addWidget(selector, 1);
+        selector_ = new QComboBox(this);
+        selector_->addItems(effectNames);
+        selector_->setCurrentIndex(selectedIndex);
+        activeIndex_ = selectedIndex;
+        selectorRow->addWidget(selector_, 1);
         layout->addLayout(selectorRow);
-        connect(selector, QOverload<int>::of(&QComboBox::activated), this,
-                [this, selectedIndex, selectEffect = std::move(selectEffect)](int index) {
-                    if (index == selectedIndex || !selectEffect) return;
-                    // Switching closes this dialog. Defer until Qt has returned
-                    // from the combo box's own activated() signal.
-                    QTimer::singleShot(0, this, [selectEffect, index] {
-                        selectEffect(index);
+        // The selector must never destroy/recreate its owning dialog while
+        // QComboBox is finishing a popup selection: that caused a use-after-free.
+        // Dispatch to the *main window* after the popup has fully closed.
+        connect(selector_, QOverload<int>::of(&QComboBox::activated), this,
+                [this, parent, selectEffect = std::move(selectEffect)](int index) {
+                    if (!selectEffect || index == activeIndex_) return;
+                    // The current index is stored independently so it is only
+                    // changed after a successful editor switch.
+                    const QPointer<PluginEditorDialog> alive(this);
+                    QTimer::singleShot(75, parent, [alive, selectEffect, index] {
+                        if (alive) selectEffect(index);
                     });
                 });
         surface_ = new QWidget(this);
@@ -385,6 +390,26 @@ public:
         if (processor_ != nullptr && attached_) processor_->close_editor();
         attached_ = false;
         xembed_.reset();
+    }
+
+    bool switchProcessor(vst_host::audio::Vst3Processor* processor, int index,
+                         QString& error) {
+        if (!processor) {
+            error = tr("The requested effect is not ready.");
+            selector_->setCurrentIndex(activeIndex_);
+            return false;
+        }
+        // Keep this Qt dialog and its selector alive. Only the embedded VST3
+        // view and X11 socket are replaced, avoiding the combo box UAF.
+        detachEditor();
+        processor_ = processor;
+        if (!attachEditor(error)) {
+            selector_->setCurrentIndex(activeIndex_);
+            return false;
+        }
+        activeIndex_ = index;
+        selector_->setCurrentIndex(index);
+        return true;
     }
 
 protected:
@@ -416,7 +441,10 @@ public:
         }
         show();
         surface_->show();
-        QApplication::processEvents();
+        if (!attached_ && !windowInitialized_) {
+            QApplication::processEvents();
+            windowInitialized_ = true;
+        }
 
         int width = 0;
         int height = 0;
@@ -446,6 +474,9 @@ public:
 
 private:
     vst_host::audio::Vst3Processor* processor_{};
+    QComboBox* selector_{};
+    int activeIndex_{-1};
+    bool windowInitialized_{false};
     QWidget* surface_{};
     std::unique_ptr<XEmbedSurface> xembed_;
     bool attached_{false};
@@ -1003,12 +1034,28 @@ private:
 
     void openEditor() {
         const int selectedIndex = chainList_->currentRow();
-        if (editorDialog_ && editorIndex_ == selectedIndex) {
+        if (editorDialog_) {
+            if (editorIndex_ == selectedIndex) {
+                editorDialog_->raise();
+                editorDialog_->activateWindow();
+                return;
+            }
+            if (!engine_ || selectedIndex < 0) return;
+            auto* next = engine_->plugin_processor(static_cast<std::size_t>(selectedIndex));
+            QString error;
+            if (!editorDialog_->switchProcessor(next, selectedIndex, error)) {
+                QMessageBox::warning(this, tr("Could not switch plugin editor"), error);
+                return;
+            }
+            editorIndex_ = selectedIndex;
+            editorDialog_->setWindowTitle(tr("Effect %1: %2")
+                .arg(selectedIndex + 1)
+                .arg(QFileInfo(chainList_->item(selectedIndex)
+                    ->data(Qt::UserRole).toString()).completeBaseName()));
             editorDialog_->raise();
             editorDialog_->activateWindow();
             return;
         }
-        closeEditorDialog();
         if (QGuiApplication::platformName() != QStringLiteral("xcb")) {
             QMessageBox::information(
                 this, tr("X11 editor embedding required"),

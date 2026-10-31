@@ -653,6 +653,8 @@ private:
         vst_host::audio::PipeWireOptions options;
         for (int i = 0; i < chainList_->count(); ++i)
             options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
+        for (int i = 0; i < pluginDirectories_->count(); ++i)
+            options.plugin_directories.push_back(pluginDirectories_->item(i)->text().toStdString());
         options.input_target = inputTarget_->text().trimmed().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;

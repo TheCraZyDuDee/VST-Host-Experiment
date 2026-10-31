@@ -1,6 +1,9 @@
 #pragma once
 
 #include <pipewire/pipewire.h>
+#include <pipewire/keys.h>
+#include <pipewire/node.h>
+#include <spa/utils/dict.h>
 
 #include <algorithm>
 #include <cstdint>

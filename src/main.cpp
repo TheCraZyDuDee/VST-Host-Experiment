@@ -1,4 +1,5 @@
 #include "audio/pipewire_engine.hpp"
+#include "audio/config.hpp"
 
 #include <cerrno>
 #include <cstdlib>
@@ -44,7 +45,7 @@ int main(int argc, char** argv) {
 
     for (int i = 1; i < argc; ++i) {
         const std::string_view arg(argv[i]);
-        if (arg == "--help") {
+        if (arg == "--config" || arg == "--save-config") { ++i; continue; }\n        if (arg == "--help") {
             print_usage(argv[0]);
             return 0;
         }
@@ -98,6 +99,6 @@ int main(int argc, char** argv) {
         return 2;
     }
 
-    vst_host::audio::PipeWireEngine engine(std::move(options));
+    if (!save_config_path.empty()) {\n        std::string error;\n        if (!vst_host::audio::save_config(save_config_path, options, error)) {\n            std::cerr << error << "\\n";\n            return 2;\n        }\n    }\n\n    vst_host::audio::PipeWireEngine engine(std::move(options));
     return engine.run() == 0 ? 0 : 1;
 }

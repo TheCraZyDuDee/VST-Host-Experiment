@@ -366,6 +366,19 @@ public:
         pluginLayout->addWidget(addPluginButton_);
         form->addRow(tr("Plugin bundle"), pluginRow);
 
+        availablePlugins_ = new QListWidget(central);
+        availablePlugins_->setSelectionMode(QAbstractItemView::SingleSelection);
+        root->addWidget(new QLabel(tr("Available plugins (from individual bundles and search directories)"), central));
+        root->addWidget(availablePlugins_, 1);
+        auto* availableActions = new QHBoxLayout();
+        auto* addSelectedPluginButton = new QPushButton(tr("Add selected to chain →"), central);
+        auto* refreshPluginListButton = new QPushButton(tr("Refresh list"), central);
+        availableActions->addWidget(addSelectedPluginButton);
+        availableActions->addWidget(refreshPluginListButton);
+        root->addLayout(availableActions);
+        connect(addSelectedPluginButton, &QPushButton::clicked, this, [this] { addAvailablePluginToChain(); });
+        connect(refreshPluginListButton, &QPushButton::clicked, this, [this] { scanPluginDirectories(); });
+
         chainList_ = new QListWidget(central);
         chainList_->setSelectionMode(QAbstractItemView::SingleSelection);
         chainList_->setDragDropMode(QAbstractItemView::InternalMove);
@@ -505,11 +518,11 @@ public:
 
         connect(addPluginButton_, &QPushButton::clicked, this, [this] {
             const auto path = QFileDialog::getExistingDirectory(
-                this, tr("Add VST3 effect bundle"), pluginPath_->text());
+                this, tr("Add individual VST3 plugin bundle"), pluginPath_->text());
             if (!path.isEmpty()) {
-                chainList_->addItem(path);
-                chainList_->setCurrentRow(chainList_->count() - 1);
                 pluginPath_->setText(path);
+                addAvailablePlugin(path);
+                saveSettings();
             }
         });
         connect(removePluginButton_, &QPushButton::clicked, this, [this] {
@@ -629,22 +642,39 @@ private:
         if (chainList_->count() > 0) chainList_->setCurrentRow(0);
     }
 
+    void addAvailablePlugin(const QString& path) {
+        if (path.trimmed().isEmpty()) return;
+        for (int i = 0; i < availablePlugins_->count(); ++i)
+            if (availablePlugins_->item(i)->text() == path) return;
+        availablePlugins_->addItem(path);
+        availablePlugins_->sortItems(Qt::AscendingOrder);
+    }
+
+    void addAvailablePluginToChain() {
+        auto* selected = availablePlugins_->currentItem();
+        if (!selected) return;
+        const QString path = selected->text();
+        for (int i = 0; i < chainList_->count(); ++i)
+            if (chainList_->item(i)->text() == path) {
+                status_->setText(tr("That plugin is already in the processing chain."));
+                return;
+            }
+        chainList_->addItem(path);
+        chainList_->setCurrentRow(chainList_->count() - 1);
+        saveSettings();
+    }
+
     void scanPluginDirectories() {
         std::vector<std::string> directories;
         for (int i = 0; i < pluginDirectories_->count(); ++i)
             directories.push_back(pluginDirectories_->item(i)->text().toStdString());
         std::string warning;
         const auto discovered = vst_host::audio::discover_vst3_plugins(directories, &warning);
-        for (const auto& path : discovered) {
-            const auto qpath = QString::fromStdString(path);
-            bool exists = false;
-            for (int i = 0; i < chainList_->count(); ++i)
-                if (chainList_->item(i)->text() == qpath) exists = true;
-            if (!exists) chainList_->addItem(qpath);
-        }
+        for (const auto& path : discovered)
+            addAvailablePlugin(QString::fromStdString(path));
         if (!warning.empty()) status_->setText(QString::fromStdString(warning));
-        if (chainList_->count() > 0 && chainList_->currentRow() < 0)
-            chainList_->setCurrentRow(0);
+        if (availablePlugins_->count() > 0 && availablePlugins_->currentRow() < 0)
+            availablePlugins_->setCurrentRow(0);
     }
 
     void loadConfiguration() {
@@ -877,6 +907,7 @@ private:
     }
 
     QLineEdit* pluginPath_{};
+    QListWidget* availablePlugins_{};
     QListWidget* chainList_{};
     QListWidget* pluginDirectories_{};
     QListWidget* windowsPluginDirectories_{};

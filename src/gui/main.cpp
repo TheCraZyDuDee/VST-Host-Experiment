@@ -1,5 +1,6 @@
 #include "audio/pipewire_engine.hpp"
 #include "audio/config.hpp"
+#include "audio/plugin_discovery.hpp"
 #include "audio/vst3_processor.hpp"
 
 #include <QApplication>
@@ -385,6 +386,41 @@ public:
         connect(loadConfigButton, &QPushButton::clicked, this, [this] { loadConfiguration(); });
         connect(saveConfigButton, &QPushButton::clicked, this, [this] { saveConfiguration(); });
 
+        root->addWidget(new QLabel(tr("Plugin search directories"), central));
+        pluginDirectories_ = new QListWidget(central);
+        pluginDirectories_->setMaximumHeight(90);
+        root->addWidget(pluginDirectories_);
+        auto* directoryActions = new QHBoxLayout();
+        auto* addDirectoryButton = new QPushButton(tr("Add plugin directory…"), central);
+        auto* removeDirectoryButton = new QPushButton(tr("Remove directory"), central);
+        auto* rescanDirectoriesButton = new QPushButton(tr("Scan directories"), central);
+        directoryActions->addWidget(addDirectoryButton);
+        directoryActions->addWidget(removeDirectoryButton);
+        directoryActions->addWidget(rescanDirectoriesButton);
+        root->addLayout(directoryActions);
+        connect(addDirectoryButton, &QPushButton::clicked, this, [this] {
+            const auto path = QFileDialog::getExistingDirectory(this, tr("Add plugin search directory"));
+            if (path.isEmpty()) return;
+            bool exists = false;
+            for (int i = 0; i < pluginDirectories_->count(); ++i)
+                if (pluginDirectories_->item(i)->text() == path) exists = true;
+            if (!exists) pluginDirectories_->addItem(path);
+            scanPluginDirectories();
+            saveSettings();
+        });
+        connect(removeDirectoryButton, &QPushButton::clicked, this, [this] {
+            const int row = pluginDirectories_->currentRow();
+            if (row >= 0) delete pluginDirectories_->takeItem(row);
+            saveSettings();
+        });
+        connect(rescanDirectoriesButton, &QPushButton::clicked, this, [this] {
+            const auto countBefore = chainList_->count();
+            scanPluginDirectories();
+            status_->setText(tr("Directory scan complete. %1 new plugin(s) added.")
+                                 .arg(chainList_->count() - countBefore));
+            saveSettings();
+        });
+
         inputTarget_ = new QLineEdit(central);
         inputTarget_->setPlaceholderText(tr("Leave empty to use the default microphone"));
         form->addRow(tr("PipeWire input target"), inputTarget_);
@@ -477,6 +513,8 @@ private:
         settings.beginGroup(QStringLiteral("audio"));
         const auto paths = settings.value(QStringLiteral("pluginChain")).toStringList();
         for (const auto& path : paths) chainList_->addItem(path);
+        const auto directories = settings.value(QStringLiteral("pluginDirectories")).toStringList();
+        for (const auto& directory : directories) pluginDirectories_->addItem(directory);
         inputTarget_->setText(settings.value(QStringLiteral("inputTarget")).toString());
         outputName_->setText(settings.value(QStringLiteral("outputName"),
                                              QStringLiteral("vst-host-virtual-mic")).toString());
@@ -485,6 +523,7 @@ private:
                                                 QStringLiteral("128")).toString());
         bypass_->setChecked(settings.value(QStringLiteral("gainBypassed"), false).toBool());
         settings.endGroup();
+        scanPluginDirectories();
         if (chainList_->count() > 0) chainList_->setCurrentRow(0);
     }
 
@@ -496,6 +535,10 @@ private:
         for (int i = 0; i < chainList_->count(); ++i)
             paths.push_back(chainList_->item(i)->text());
         settings.setValue(QStringLiteral("pluginChain"), paths);
+        QStringList directories;
+        for (int i = 0; i < pluginDirectories_->count(); ++i)
+            directories.push_back(pluginDirectories_->item(i)->text());
+        settings.setValue(QStringLiteral("pluginDirectories"), directories);
         settings.setValue(QStringLiteral("inputTarget"), inputTarget_->text());
         settings.setValue(QStringLiteral("outputName"), outputName_->text());
         settings.setValue(QStringLiteral("gain"), gain_->value());
@@ -509,6 +552,8 @@ private:
         vst_host::audio::PipeWireOptions options;
         for (int i = 0; i < chainList_->count(); ++i)
             options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
+        for (int i = 0; i < pluginDirectories_->count(); ++i)
+            options.plugin_directories.push_back(pluginDirectories_->item(i)->text().toStdString());
         options.input_target = inputTarget_->text().trimmed().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;
@@ -522,12 +567,34 @@ private:
         chainList_->clear();
         for (const auto& path : options.plugin_paths)
             chainList_->addItem(QString::fromStdString(path));
+        pluginDirectories_->clear();
+        for (const auto& directory : options.plugin_directories)
+            pluginDirectories_->addItem(QString::fromStdString(directory));
+        scanPluginDirectories();
         inputTarget_->setText(QString::fromStdString(options.input_target));
         outputName_->setText(QString::fromStdString(options.output_name));
         gain_->setValue(options.gain);
         latency_->setCurrentText(QString::number(options.latency_frames));
         bypass_->setChecked(options.bypass);
         if (chainList_->count() > 0) chainList_->setCurrentRow(0);
+    }
+
+    void scanPluginDirectories() {
+        std::vector<std::string> directories;
+        for (int i = 0; i < pluginDirectories_->count(); ++i)
+            directories.push_back(pluginDirectories_->item(i)->text().toStdString());
+        std::string warning;
+        const auto discovered = vst_host::audio::discover_vst3_plugins(directories, &warning);
+        for (const auto& path : discovered) {
+            const auto qpath = QString::fromStdString(path);
+            bool exists = false;
+            for (int i = 0; i < chainList_->count(); ++i)
+                if (chainList_->item(i)->text() == qpath) exists = true;
+            if (!exists) chainList_->addItem(qpath);
+        }
+        if (!warning.empty()) status_->setText(QString::fromStdString(warning));
+        if (chainList_->count() > 0 && chainList_->currentRow() < 0)
+            chainList_->setCurrentRow(0);
     }
 
     void loadConfiguration() {
@@ -586,6 +653,8 @@ private:
         vst_host::audio::PipeWireOptions options;
         for (int i = 0; i < chainList_->count(); ++i)
             options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
+        for (int i = 0; i < pluginDirectories_->count(); ++i)
+            options.plugin_directories.push_back(pluginDirectories_->item(i)->text().toStdString());
         options.input_target = inputTarget_->text().trimmed().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;
@@ -715,6 +784,7 @@ private:
 
     QLineEdit* pluginPath_{};
     QListWidget* chainList_{};
+    QListWidget* pluginDirectories_{};
     QPushButton* addPluginButton_{};
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};

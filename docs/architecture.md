@@ -45,3 +45,8 @@ Windows-only plugins are out of scope for the first working prototype. A later W
 The CLI and optional Qt frontend share the line-oriented `.vsthost` format implemented in `src/audio/config.hpp`. It stores the PipeWire input target, virtual-source name, gain, requested latency, gain bypass, and an ordered list of native VST3 bundle paths. String values are quoted and escaped; repeated `plugin` keys preserve chain order. Unknown keys and invalid values fail loading rather than being silently ignored.
 
 The GUI's Load/Save configuration actions import and export this format. The CLI accepts `--config FILE` to start the same setup without Qt, and `--save-config FILE` to export the effective options. This is the supported lightweight background/headless path; it still runs inside the user's PipeWire session and does not require a GUI process. The file does not yet include plugin-internal controller/component state or plugin directory search paths.
+
+
+## Plugin search directories
+
+The plugin scanner in `src/audio/plugin_discovery.hpp` recursively searches configured directories for Linux VST3 bundle directories (`*.vst3`). It stops recursion when a bundle is found so bundle-internal resources are not mistaken for separate plugins. Results are sorted for deterministic startup order. Explicit plugin paths remain first; directory discoveries are appended after them. Scanning and plugin loading happen before PipeWire streams start, never in a real-time callback. The Qt UI keeps a separate list of search directories and offers an explicit rescan action; discovered bundles are inserted into the editable processing chain. Search directories are stored in `.vsthost` files and desktop settings. The CLI uses repeated `--plugin-dir PATH` options.

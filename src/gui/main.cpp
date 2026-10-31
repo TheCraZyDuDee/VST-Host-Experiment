@@ -12,6 +12,8 @@
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
+#include <QEvent>
+#include <QResizeEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -51,7 +53,8 @@ namespace {
 
 class XEmbedSurface final {
 public:
-    explicit XEmbedSurface(Window qtParent) {
+    explicit XEmbedSurface(Window qtParent, QWidget* focusOwner)
+        : focusOwner_(focusOwner) {
         display_ = XOpenDisplay(nullptr);
         if (!display_) {
             error_ = "Could not open the X11 display for the VST3 editor host.";
@@ -74,7 +77,8 @@ public:
                      parentAttributes.width, parentAttributes.height,
                      parentAttributes.x, parentAttributes.y);
         XSetWindowAttributes attributes{};
-        attributes.override_redirect = True;
+        // Use a normal X11 child: Wine editors may create focusable children.
+        attributes.override_redirect = False;
         window_ = XCreateWindow(display_, qtParent, 0, 0, 320, 180, 0, CopyFromParent,
                                 InputOutput, CopyFromParent, CWOverrideRedirect, &attributes);
         if (!window_) {
@@ -120,14 +124,33 @@ public:
                      "[VST3 XEmbed] VST3 attached() returned success; waiting for plugin child-window creation.\n");
     }
 
+    void focusPlugin() {
+        if (!valid() || children_.empty()) return;
+        if (focusOwner_) focusOwner_->setFocus(Qt::OtherFocusReason);
+        // XEmbed logical focus alone is insufficient for native key delivery.
+        XSetInputFocus(display_, children_.front(), RevertToParent, CurrentTime);
+        sendXEmbedMessage(children_.front(), 4); // XEMBED_FOCUS_IN
+        XFlush(display_);
+    }
+
+    void setActive(bool active) {
+        if (!valid() || children_.empty()) return;
+        for (const auto child : children_) {
+            sendXEmbedMessage(child, active ? 1 : 2); // WINDOW_ACTIVATE/DEACTIVATE
+            sendXEmbedMessage(child, active ? 4 : 5); // FOCUS_IN/OUT
+        }
+        XFlush(display_);
+    }
+
     void resizeTo(int width, int height) {
         lastWidth_ = std::max(1, width);
         lastHeight_ = std::max(1, height);
         if (!valid()) return;
         XResizeWindow(display_, window_, static_cast<unsigned int>(lastWidth_),
                       static_cast<unsigned int>(lastHeight_));
-        for (const auto child : children_) {
-            XMoveResizeWindow(display_, child, 0, 0,
+        // Never resize popup or auxiliary windows created by Wine.
+        if (!children_.empty()) {
+            XMoveResizeWindow(display_, children_.front(), 0, 0,
                               static_cast<unsigned int>(lastWidth_),
                               static_cast<unsigned int>(lastHeight_));
         }
@@ -161,8 +184,8 @@ private:
         message.xclient.data.l[0] = CurrentTime;
         message.xclient.data.l[1] = opcode;
         message.xclient.data.l[2] = 0;
-        message.xclient.data.l[3] = static_cast<long>(window_);
-        message.xclient.data.l[4] = embedVersion_;
+        message.xclient.data.l[3] = 0;
+        message.xclient.data.l[4] = 0;
         XSendEvent(display_, child, False, NoEventMask, &message);
     }
 
@@ -174,6 +197,8 @@ private:
             switch (event.type) {
             case CreateNotify:
                 if (event.xcreatewindow.parent == window_) {
+                    // Only the first direct child is the hosted editor.
+                    if (!children_.empty()) break;
                     const Window child = event.xcreatewindow.window;
                     children_.push_back(child);
                     std::fprintf(stderr,
@@ -215,6 +240,7 @@ private:
                     XSync(display_, False);
                     sendXEmbedMessage(child, 1); // XEMBED_WINDOW_ACTIVATE
                     sendXEmbedMessage(child, 4); // XEMBED_FOCUS_IN
+                    if (focusOwner_ && focusOwner_->hasFocus()) focusPlugin();
                     XWindowAttributes childAttributes{};
                     if (XGetWindowAttributes(display_, child, &childAttributes)) {
                         std::fprintf(stderr,
@@ -255,10 +281,16 @@ private:
                 break;
             }
             case FocusIn:
-                for (const auto child : children_) sendXEmbedMessage(child, 1);
+                setActive(true);
                 break;
             case FocusOut:
-                for (const auto child : children_) sendXEmbedMessage(child, 2);
+                setActive(false);
+                break;
+            case ClientMessage:
+                if (event.xclient.message_type == xembedAtom_ &&
+                    event.xclient.data.l[1] == 3) { // XEMBED_REQUEST_FOCUS
+                    focusPlugin();
+                }
                 break;
             case DestroyNotify:
                 children_.erase(std::remove(children_.begin(), children_.end(),
@@ -277,6 +309,7 @@ private:
         XFlush(display_);
     }
 
+    QWidget* focusOwner_{};
     Display* display_{};
     Window window_{};
     Atom xembedAtom_{};
@@ -301,16 +334,42 @@ public:
         auto* layout = new QVBoxLayout(this);
         surface_ = new QWidget(this);
         surface_->setAttribute(Qt::WA_NativeWindow);
+        surface_->setFocusPolicy(Qt::StrongFocus);
+        surface_->installEventFilter(this);
         surface_->setMinimumSize(320, 180);
         layout->addWidget(surface_);
         resize(480, 320);
     }
 
-    ~PluginEditorDialog() override {
-        if (processor_ != nullptr && attached_) {
-            processor_->close_editor();
-        }
+    ~PluginEditorDialog() override { detachEditor(); }
+
+    void detachEditor() {
+        if (processor_ != nullptr && attached_) processor_->close_editor();
+        attached_ = false;
+        xembed_.reset();
     }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (watched == surface_ && xembed_ &&
+            (event->type() == QEvent::FocusIn || event->type() == QEvent::MouseButtonPress))
+            xembed_->focusPlugin();
+        return QDialog::eventFilter(watched, event);
+    }
+
+    void changeEvent(QEvent* event) override {
+        QDialog::changeEvent(event);
+        if (xembed_ && event->type() == QEvent::ActivationChange)
+            xembed_->setActive(isActiveWindow());
+    }
+
+    void resizeEvent(QResizeEvent* event) override {
+        QDialog::resizeEvent(event);
+        if (xembed_ && attached_)
+            xembed_->resizeTo(surface_->width(), surface_->height());
+    }
+
+public:
 
     bool attachEditor(QString& error) {
         if (processor_ == nullptr) {
@@ -325,7 +384,7 @@ public:
         int height = 0;
         std::string detail;
         const auto nativeId = static_cast<Window>(surface_->winId());
-        xembed_ = std::make_unique<XEmbedSurface>(nativeId);
+        xembed_ = std::make_unique<XEmbedSurface>(nativeId, surface_);
         if (!xembed_->valid()) {
             error = QString::fromStdString(xembed_->error());
             return false;
@@ -341,6 +400,7 @@ public:
         surface_->resize(width, height);
         xembed_->resizeTo(width, height);
         resize(width + 24, height + 48);
+        xembed_->setActive(isActiveWindow());
         return true;
     }
 

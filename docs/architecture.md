@@ -50,3 +50,8 @@ The GUI's Load/Save configuration actions import and export this format. The CLI
 ## Plugin search directories
 
 The plugin scanner in `src/audio/plugin_discovery.hpp` recursively searches configured directories for Linux VST3 bundle directories (`*.vst3`). It stops recursion when a bundle is found so bundle-internal resources are not mistaken for separate plugins. Results are sorted for deterministic startup order. Explicit plugin paths remain first; directory discoveries are appended after them. Scanning and plugin loading happen before PipeWire streams start, never in a real-time callback. The Qt UI keeps a separate list of search directories and offers an explicit rescan action; discovered bundles are inserted into the editable processing chain. Search directories are stored in `.vsthost` files and desktop settings. The CLI uses repeated `--plugin-dir PATH` options.
+
+
+## Windows plugin compatibility
+
+The proposed optional Windows VST3 backend is Wine plus yabridge. The native PipeWire host and its processing graph remain outside Wine; the Linux-side yabridge wrapper is loaded through the existing VST3 adapter. See [the compatibility evaluation](windows-vst3-bridge.md) for IPC, shared-memory, performance, licensing, and implementation constraints. This backend is not yet implemented.

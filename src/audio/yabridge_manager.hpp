@@ -129,9 +129,14 @@ inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& 
             error = "Windows VST3 directory is unavailable: " + directory;
             return false;
         }
+        const auto canonical_path = std::filesystem::canonical(path, ec);
+        if (ec) {
+            error = "Could not resolve Windows VST3 directory: " + directory + " (" + ec.message() + ")";
+            return false;
+        }
         std::string output;
         if (!detail::run_yabridge_command(
-                {yabridgectl, "add", std::filesystem::canonical(path).string()},
+                {yabridgectl, "add", canonical_path.string()},
                 output, error)) {
             error = "Could not register Windows VST3 directory '" + directory +
                     "' with yabridge.\n" + error;

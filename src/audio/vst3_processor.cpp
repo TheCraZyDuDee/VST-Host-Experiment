@@ -377,6 +377,15 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
         close_editor();
         return false;
     }
+    // The host has sized the X11 socket; explicitly tell the plug-in its
+    // attached view's dimensions. Some Wine/yabridge editors use this event to
+    // synchronize their native window geometry, including mouse coordinates.
+    // This is best-effort: some VST3 views do not implement onSize().
+    const auto on_size_result = impl_->editor_view->onSize(&size);
+    if (on_size_result != Steinberg::kResultOk) {
+        std::fprintf(stderr, "[VST3 editor] onSize after attach returned %d.\n",
+                     static_cast<int>(on_size_result));
+    }
     std::fprintf(stderr, "[VST3 editor] Host attachment succeeded; requested view size=%dx%d.\n",
                  width, height);
     return true;

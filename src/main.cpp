@@ -21,6 +21,7 @@ void print_usage(const char* executable) {
         << "  --input NODE        PipeWire microphone node id/name\n"
         << "  --name NODE_NAME    Virtual microphone node name\n"
         << "  --plugin PATH       Add a VST3 effect; repeat to add more\n"
+        << "  --plugin-dir PATH   Scan a directory for .vst3 bundles; repeat as needed\n"
         << "  --gain VALUE        Linear gain from 0.0 to 4.0\n"
         << "  --latency-frames N  128, 256, 512, or 1024\n"
         << "  --bypass            Bypass the gain processor\n"
@@ -76,7 +77,7 @@ int main(int argc, char** argv) {
             options.bypass = true;
             continue;
         }
-        if (arg == "--input" || arg == "--name" || arg == "--plugin" ||
+        if (arg == "--input" || arg == "--name" || arg == "--plugin" || arg == "--plugin-dir" ||
             arg == "--gain" || arg == "--latency-frames") {
             if (i + 1 >= argc) {
                 std::cerr << "Missing value for " << arg << ".\n";
@@ -93,6 +94,12 @@ int main(int argc, char** argv) {
                 }
                 options.output_name = value;
                 options.output_description = value;
+            } else if (arg == "--plugin-dir") {
+                if (value.empty()) {
+                    std::cerr << "Plugin directory cannot be empty.\n";
+                    return 2;
+                }
+                options.plugin_directories.emplace_back(value);
             } else if (arg == "--plugin") {
                 if (value.empty()) {
                     std::cerr << "Plugin path cannot be empty.\n";

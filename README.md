@@ -4,7 +4,7 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 
 ## Current status
 
-**Prototype 0.5 development:** the command-line host supports an optional native Linux VST3 effect. An optional Qt 6 frontend adds plugin bundle selection, input-target configuration, start/stop controls, and an embedded plugin editor on X11. The CLI and SDK-free build remain available independently. The GUI is an initial implementation; device enumeration, multi-plugin chains, state persistence, and Wayland-native editor embedding are not implemented yet.
+**Prototype 0.6 development:** the command-line host supports optional native Linux VST3 effects in an ordered chain. The optional Qt 6 frontend provides chain editing, plugin editors on X11, and portable configuration import/export. The CLI can load the same configuration in headless mode without Qt. Device enumeration and Windows-plugin bridging remain in progress.
 
 ## Goals
 
@@ -61,7 +61,7 @@ cmake --build build-vst3-gui
 ./build-vst3-gui/vst-host-gui
 ```
 
-The GUI lets you add multiple `.vst3` bundle directories to an ordered processing chain, drag entries to reorder them (or use the Move up/Move down controls), remove entries, and open the selected plugin's editor. The chain and audio routing/gain/latency settings are saved between launches using the desktop settings store. It also lets you specify a PipeWire input node id/name (or leave it empty for the default microphone), configure gain and requested latency, and start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
+The GUI lets you add multiple `.vst3` bundle directories to an ordered processing chain, drag entries to reorder them (or use the Move up/Move down controls), remove entries, and open the selected plugin's editor. It also provides Load configuration and Save configuration for portable `.vsthost` files. The chain and audio routing/gain/latency settings are additionally saved between launches using the desktop settings store. It also lets you specify a PipeWire input node id/name (or leave it empty for the default microphone), configure gain and requested latency, and start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
 
 
 The first configure downloads the SDK and its required source submodules; later builds reuse them in the CMake build directory. VSTGUI and the SDK's example plugins are disabled because this headless host does not need them. To use an SDK checkout you already have instead, pass `-DVST3_SDK_ROOT=/path/to/vst3sdk` with `-DVST_HOST_ENABLE_VST3=ON`. VST3 hosting stays optional, so the normal build does not need a network connection or the SDK. The SDK is distributed under the terms in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
@@ -72,7 +72,7 @@ The application must run inside a logged-in desktop/user session with PipeWire a
 ./build/vst-host --input NODE_ID_OR_NAME --name vst-host-mic --gain 1.0
 ```
 
-Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, repeat `--plugin` to load multiple native Linux VST3 audio effects in series, in command-line order, before the gain stage. For example:
+Use `--config my-setup.vsthost` to load a configuration saved by the GUI and run it headlessly (no Qt process or desktop window is started). CLI options supplied after `--config` override scalar settings; repeated `--plugin` entries append to the configured chain. Use `--save-config my-setup.vsthost` to write the effective CLI settings before starting. Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, repeat `--plugin` to load multiple native Linux VST3 audio effects in series, in command-line order, before the gain stage. For example:
 
 ```sh
 ./build-vst3/vst-host --input NODE_ID_OR_NAME --plugin /path/to/Effect.vst3 --name vst-host-mic
@@ -84,9 +84,9 @@ The output source is intended to appear in applications' microphone/input-device
 
 ## Known limitations
 
-- No device picker yet; `--input` accepts a PipeWire target id/name, and the default source is used otherwise.
+- The GUI does not yet enumerate microphones; `--input` accepts a PipeWire target id/name, and the default source is used otherwise. The device picker is a planned next milestone.
 - Stereo F32 input is requested at 48 kHz. Compatibility with mono-only devices and other negotiated formats still needs testing.
-- Plug-in-internal state persistence, generic parameter controls, meters, and device enumeration are not implemented. The GUI does persist plugin bundle order and host audio settings. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.
+- Plug-in-internal state persistence, generic parameter controls, meters, device enumeration, and plugin-directory scanning are not implemented. Portable host configuration files store plugin paths and host audio settings, but not plugin-internal state. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.
 - The chain is prepared before the PipeWire real-time callback starts; its process path performs ordered in-place processing without chain allocation or locking. Real-world CPU use, cumulative plugin latency, and device compatibility still need measurement on a PipeWire system.
 
 See [architecture notes](docs/architecture.md) and [roadmap](docs/roadmap.md).

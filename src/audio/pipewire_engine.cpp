@@ -1,6 +1,7 @@
 #include "pipewire_engine.hpp"
 
 #include "stereo_ring_buffer.hpp"
+#include "processor_chain.hpp"
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
 
@@ -34,6 +35,7 @@ struct EngineState {
     StereoRingBuffer ring;
     GainProcessor processor;
     std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
+    ProcessorChain processor_chain;
     std::size_t latency_frames{128};
     int setup_error{0};
 };
@@ -100,9 +102,7 @@ void on_source_process(void* userdata) {
         auto* samples = reinterpret_cast<float*>(data.data);
 
         state->ring.pop_interleaved(samples, frames, state->latency_frames * 2);
-        for (const auto& plugin : state->plugin_chain) {
-            if (plugin) plugin->process(samples, frames);
-        }
+        state->processor_chain.process(samples, frames);
         state->processor.process(samples, frames);
 
         data.chunk->offset = 0;
@@ -369,6 +369,7 @@ int PipeWireEngine::run() {
                          index + 1, plugin_paths[index].c_str(), plugin_error.c_str());
             return -EINVAL;
         }
+        impl_->state.processor_chain.add(*plugin);
         impl_->state.plugin_chain.push_back(std::move(plugin));
     }
 
@@ -377,13 +378,9 @@ int PipeWireEngine::run() {
         std::fprintf(stderr, "Could not prepare audio processor.\n");
         return -EINVAL;
     }
-    for (std::size_t index = 0; index < impl_->state.plugin_chain.size(); ++index) {
-        if (!impl_->state.plugin_chain[index]->prepare(process_spec)) {
-            std::fprintf(stderr,
-                         "Could not prepare VST3 plugin %zu ('%s') for stereo 48 kHz audio.\n",
-                         index + 1, impl_->state.plugin_chain[index]->plugin_path().c_str());
-            return -EINVAL;
-        }
+    if (!impl_->state.processor_chain.prepare(process_spec)) {
+        std::fprintf(stderr, "Could not prepare the ordered VST3 processor chain.\\n");
+        return -EINVAL;
     }
 
     auto result = impl_->create_source_stream();

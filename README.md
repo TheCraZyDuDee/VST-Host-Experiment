@@ -72,7 +72,7 @@ The application must run inside a logged-in desktop/user session with PipeWire a
 ./build/vst-host --input NODE_ID_OR_NAME --name vst-host-mic --gain 1.0
 ```
 
-Use `--config my-setup.vsthost` to load a configuration saved by the GUI and run it headlessly (no Qt process or desktop window is started). CLI options supplied after `--config` override scalar settings; repeated `--plugin` entries append to the configured chain. Use `--save-config my-setup.vsthost` to write the effective CLI settings before starting. Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, repeat `--plugin` to load individual native Linux VST3 audio effects, or use `--plugin-dir PATH` to scan a directory recursively for `.vst3` bundles. Multiple plugin directories can be supplied; discovered plugins are appended in sorted path order after individually specified plugins. For example:
+Use `--config my-setup.vsthost` to load a configuration saved by the GUI and run it headlessly (no Qt process or desktop window is started). CLI options supplied after `--config` override scalar settings; repeated `--plugin` entries append to the configured chain. Use `--save-config my-setup.vsthost` to write the effective CLI settings before starting. Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, repeat `--plugin` to load individual native Linux VST3 audio effects, use `--plugin-dir PATH` to scan a directory recursively for Linux `.vst3` bundles, or use `--windows-plugin-dir PATH` to register a Windows VST3 directory with Wine/yabridge. Windows directories are synchronized automatically before the audio stream starts, and generated Linux-side wrappers are loaded into the same chain. Multiple plugin directories can be supplied; discovered plugins are appended in sorted path order after individually specified plugins. For example:
 
 ```sh
 ./build-vst3/vst-host --input NODE_ID_OR_NAME --plugin /path/to/Effect.vst3 --name vst-host-mic
@@ -84,6 +84,7 @@ The output source is intended to appear in applications' microphone/input-device
 
 ## Known limitations
 
+- Windows VST3 support is optional and requires Wine plus yabridge/yabridgectl to be installed separately. The host registers configured Windows plugin directories and runs `yabridgectl sync`; it does not install Wine or yabridge. yabridge's own configuration is shared with other hosts, so removing a directory from this app does not unregister it from yabridge.
 - PipeWire device enumeration and selection are implemented in the GUI, but hotplug updates require pressing Refresh. The CLI still accepts `--input` as a PipeWire target id/name.
 - Stereo F32 input is requested at 48 kHz. Compatibility with mono-only devices and other negotiated formats still needs testing.
 - Plug-in-internal state persistence, generic parameter controls, meters, device enumeration is not implemented. Portable host configuration files store plugin paths and host audio settings, but not plugin-internal state. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.

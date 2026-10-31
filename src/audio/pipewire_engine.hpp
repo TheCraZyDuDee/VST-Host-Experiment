@@ -20,6 +20,8 @@ struct PipeWireOptions {
     std::vector<std::string> plugin_paths;
     // Search roots for native Linux VST3 bundle directories.
     std::vector<std::string> plugin_directories;
+    // Windows VST3 directories managed by optional Wine/yabridge integration.
+    std::vector<std::string> windows_plugin_directories;
     std::vector<std::shared_ptr<Vst3Processor>> preloaded_plugins;
     std::string plugin_path;
     std::shared_ptr<Vst3Processor> preloaded_plugin;
@@ -41,6 +43,8 @@ public:
     [[nodiscard]] Vst3Processor* plugin_processor() const noexcept;
     [[nodiscard]] Vst3Processor* plugin_processor(std::size_t index) const noexcept;
     [[nodiscard]] std::size_t plugin_count() const noexcept;
+    [[nodiscard]] std::string plugin_path(std::size_t index) const;
+    [[nodiscard]] std::string last_error() const;
 
 private:
     struct Impl;

@@ -5,6 +5,7 @@
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
 #include "plugin_discovery.hpp"
+#include "yabridge_manager.hpp"
 
 #include <pipewire/pipewire.h>
 
@@ -36,6 +37,7 @@ struct EngineState {
     StereoRingBuffer ring;
     GainProcessor processor;
     std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
+    std::vector<std::string> plugin_paths;
     ProcessorChain processor_chain;
     std::size_t latency_frames{128};
     int setup_error{0};
@@ -155,6 +157,7 @@ struct PipeWireEngine::Impl {
 
     PipeWireOptions options;
     EngineState state;
+    std::string last_error;
     spa_hook capture_listener{};
     spa_hook source_listener{};
     bool initialized{false};
@@ -317,7 +320,23 @@ std::size_t PipeWireEngine::plugin_count() const noexcept {
     return impl_ ? impl_->state.plugin_chain.size() : 0;
 }
 
+std::string PipeWireEngine::plugin_path(std::size_t index) const {
+    if (!impl_ || index >= impl_->state.plugin_paths.size()) return {};
+    return impl_->state.plugin_paths[index];
+}
+
+std::string PipeWireEngine::last_error() const {
+    return impl_ ? impl_->last_error : std::string{};
+}
+
 int PipeWireEngine::run() {
+    std::string bridge_error;
+    if (!prepare_windows_vst3_plugins(impl_->options, bridge_error)) {
+        impl_->last_error = bridge_error;
+        std::fprintf(stderr, "Windows VST3 setup failed: %s\n", bridge_error.c_str());
+        return -ENOENT;
+    }
+
     int argc = 0;
     char* arguments[] = {nullptr};
     char** argv = arguments;
@@ -378,6 +397,7 @@ int PipeWireEngine::run() {
             return -EINVAL;
         }
         impl_->state.processor_chain.add(*plugin);
+        impl_->state.plugin_paths.push_back(plugin_paths[index]);
         impl_->state.plugin_chain.push_back(std::move(plugin));
     }
 

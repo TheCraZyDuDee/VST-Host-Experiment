@@ -38,6 +38,7 @@ struct EngineState {
     GainProcessor processor;
     std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
     std::vector<std::string> plugin_paths;
+    std::string last_error;
     ProcessorChain processor_chain;
     std::size_t latency_frames{128};
     int setup_error{0};
@@ -324,9 +325,14 @@ std::string PipeWireEngine::plugin_path(std::size_t index) const {
     return impl_->state.plugin_paths[index];
 }
 
+std::string PipeWireEngine::last_error() const {
+    return impl_ ? impl_->last_error : std::string{};
+}
+
 int PipeWireEngine::run() {
     std::string bridge_error;
     if (!prepare_windows_vst3_plugins(impl_->options, bridge_error)) {
+        impl_->last_error = bridge_error;
         std::fprintf(stderr, "Windows VST3 setup failed: %s\n", bridge_error.c_str());
         return -ENOENT;
     }

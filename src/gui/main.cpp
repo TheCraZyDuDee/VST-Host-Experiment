@@ -350,7 +350,8 @@ class MainWindow final : public QMainWindow {
 public:
     MainWindow() {
         setWindowTitle(tr("VST Host Experiment"));
-        resize(760, 620);
+        resize(980, 820);
+        setMinimumSize(820, 680);
 
         auto* central = new QWidget(this);
         auto* root = new QVBoxLayout(central);
@@ -360,7 +361,7 @@ public:
         auto* pluginLayout = new QHBoxLayout(pluginRow);
         pluginLayout->setContentsMargins(0, 0, 0, 0);
         pluginPath_ = new QLineEdit(pluginRow);
-        pluginPath_->setPlaceholderText(tr("Select a native Linux .vst3 bundle"));
+        pluginPath_->setPlaceholderText(tr("Choose an individual Linux .vst3 bundle"));
         pluginLayout->addWidget(pluginPath_, 1);
         addPluginButton_ = new QPushButton(tr("Add effect"), pluginRow);
         pluginLayout->addWidget(addPluginButton_);
@@ -430,10 +431,10 @@ public:
             saveSettings();
         });
         connect(rescanDirectoriesButton, &QPushButton::clicked, this, [this] {
-            const auto countBefore = chainList_->count();
+            const auto countBefore = availablePlugins_->count();
             scanPluginDirectories();
-            status_->setText(tr("Directory scan complete. %1 new plugin(s) added.")
-                                 .arg(chainList_->count() - countBefore));
+            status_->setText(tr("Directory scan complete. %1 plugin(s) available in the browser.")
+                                 .arg(availablePlugins_->count() - countBefore));
             saveSettings();
         });
 

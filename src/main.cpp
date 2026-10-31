@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
                     std::cerr << "Plugin path cannot be empty.\n";
                     return 2;
                 }
-                options.plugin_path = value;
+                options.plugin_paths.emplace_back(value);
             } else if (arg == "--gain") {
                 if (!parse_gain(value, options.gain)) {
                     std::cerr << "Gain must be a number between 0.0 and 4.0.\n";

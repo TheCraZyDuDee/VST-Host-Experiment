@@ -6,19 +6,19 @@
 namespace {
 class Multiply final : public vst_host::audio::AudioProcessor {
 public:
-    explicit Multiply(float factor, std::uint32_t latency = 0) : factor_(factor), latency_(latency) {}
+    explicit Multiply(float factor, float offset = 0.0F, std::uint32_t latency = 0)\n        : factor_(factor), offset_(offset), latency_(latency) {}
     bool prepare(const vst_host::audio::AudioProcessSpec& spec) override {
         return spec.sample_rate == 48000 && spec.channels == 2 && spec.max_block_size > 0;
     }
     void process(float* samples, std::size_t frames) noexcept override {
-        for (std::size_t i = 0; i < frames * 2; ++i) samples[i] *= factor_;
+        for (std::size_t i = 0; i < frames * 2; ++i) samples[i] = samples[i] * factor_ + offset_;
     }
     void reset() noexcept override { ++resets_; }
     std::uint32_t latency_frames() const noexcept override { return latency_; }
     int resets() const noexcept { return resets_; }
 private:
     float factor_;
-    std::uint32_t latency_;
+    float offset_;\n    std::uint32_t latency_;
     int resets_{0};
 };
 }

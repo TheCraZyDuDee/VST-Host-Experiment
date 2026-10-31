@@ -754,6 +754,7 @@ private:
         moveDownButton_->setEnabled(true);
         editorButton_->setEnabled(false);
         status_->setText(tr("Audio engine stopped."));
+        saveSettings();
     }
 
     void openEditor() {

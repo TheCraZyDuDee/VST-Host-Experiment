@@ -362,8 +362,13 @@ public:
         selectorRow->addWidget(selector, 1);
         layout->addLayout(selectorRow);
         connect(selector, QOverload<int>::of(&QComboBox::activated), this,
-                [selectedIndex, selectEffect = std::move(selectEffect)](int index) {
-                    if (index != selectedIndex && selectEffect) selectEffect(index);
+                [this, selectedIndex, selectEffect = std::move(selectEffect)](int index) {
+                    if (index == selectedIndex || !selectEffect) return;
+                    // Switching closes this dialog. Defer until Qt has returned
+                    // from the combo box's own activated() signal.
+                    QTimer::singleShot(0, this, [selectEffect, index] {
+                        selectEffect(index);
+                    });
                 });
         surface_ = new QWidget(this);
         surface_->setAttribute(Qt::WA_NativeWindow);

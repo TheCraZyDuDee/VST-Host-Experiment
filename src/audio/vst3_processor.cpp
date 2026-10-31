@@ -577,9 +577,8 @@ void Vst3Processor::process(float* samples, std::size_t frames) noexcept {
             bool expected = false;
             if (impl_->process_failed.compare_exchange_strong(
                     expected, true, std::memory_order_relaxed)) {
-                std::fprintf(stderr,
-                             "VST3: processor process() failed (result=%d); passing dry audio through.\n",
-                             static_cast<int>(result));
+                // Never write to stderr from the real-time callback.
+                // The failure is latched atomically; keep audio passing through.
             }
             std::memcpy(impl_->output_left.data(), impl_->input_left.data(),
                         block_frames * sizeof(float));

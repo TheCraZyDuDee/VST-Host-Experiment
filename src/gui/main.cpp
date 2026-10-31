@@ -863,7 +863,8 @@ private:
         }
         const auto stats = engine_->diagnostics();
         diagnostics_->setText(tr("Buffer diagnostics — underrun: %1 frames; dropped: %2 frames")
-                                  .arg(stats.underrun_frames).arg(stats.dropped_frames));
+                                  .arg(static_cast<qulonglong>(stats.underrun_frames))
+                                  .arg(static_cast<qulonglong>(stats.dropped_frames)));
         if (engine_->plugin_processor() != nullptr) {
             while (static_cast<std::size_t>(chainList_->count()) < engine_->plugin_count()) {
                 const auto path = engine_->plugin_path(static_cast<std::size_t>(chainList_->count()));

@@ -18,7 +18,7 @@
 ## Phase 2 — Processing graph
 - [x] Define a real-time-safe processor interface and route the gain stage through it.
 - [ ] Support runtime gain/bypass changes using bounded real-time-safe control transfer.
-- [ ] Add chain ordering, channel-layout checks, and latency reporting.
+- [x] Add ordered processor chains, mono/stereo adaptation between VST3 stages, and cumulative plugin-latency reporting.
 - [ ] Add persistence for device and graph settings.
 
 ## Phase 3 — Native plugins
@@ -26,12 +26,12 @@
 - [x] Add an initial optional VST3 adapter and `--plugin PATH` support for one stereo audio effect.
 - [ ] Build with the SDK and validate load/process/unload against a real native Linux VST3 plugin.
 - [ ] Improve bus negotiation, plug-in failure reporting, state, bypass, and sample-rate/block-size changes.
-- [ ] Add a multi-plugin chain and parameter/state persistence.
+- [x] Add a multi-plugin VST3 chain in CLI and Qt UI, including ordering and selected-instance editor access.\n- [ ] Add parameter/state persistence.
 - [ ] Evaluate VST2 support and distribution implications separately.
 
 ## Phase 4 — User interface
-- [ ] Add an optional Qt 6 UI only after the engine API is stable.
-- [ ] Device selection, plugin chain editor, bypass, meters, and status.
+- [x] Add an optional Qt 6 UI with VST3 editor hosting; headless build remains independent.
+- [x] Plugin chain editor, gain bypass, and engine status.\n- [ ] Device enumeration/selection, plugin bypass, and input/output meters.
 - [ ] Ensure the app remains usable headlessly.
 
 ## Phase 5 — Later research

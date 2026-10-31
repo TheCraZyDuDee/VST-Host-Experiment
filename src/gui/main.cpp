@@ -371,7 +371,7 @@ public:
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override {
         if (watched == surface_ && xembed_ &&
-            (event->type() == QEvent::FocusIn || event->type() == QEvent::MouseButtonPress))
+            event->type() == QEvent::MouseButtonPress)
             xembed_->focusPlugin();
         return QDialog::eventFilter(watched, event);
     }

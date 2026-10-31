@@ -859,6 +859,9 @@ private:
                                         : tr("Audio engine exited with an error. See the terminal output for details.")));
             return;
         }
+        const auto stats = engine_->diagnostics();
+        diagnostics_->setText(tr("Buffer diagnostics — underrun: %1 frames; dropped: %2 frames")
+                                  .arg(stats.underrun_frames).arg(stats.dropped_frames));
         if (engine_->plugin_processor() != nullptr) {
             while (static_cast<std::size_t>(chainList_->count()) < engine_->plugin_count()) {
                 const auto path = engine_->plugin_path(static_cast<std::size_t>(chainList_->count()));
@@ -887,6 +890,7 @@ private:
     QPushButton* stopButton_{};
     QPushButton* editorButton_{};
     QLabel* status_{};
+    QLabel* diagnostics_{};
     QTimer* pollTimer_{};
     std::unique_ptr<vst_host::audio::PipeWireEngine> engine_;
     std::thread worker_;

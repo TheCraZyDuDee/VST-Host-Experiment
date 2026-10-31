@@ -379,7 +379,7 @@ int PipeWireEngine::run() {
         return -EINVAL;
     }
     if (!impl_->state.processor_chain.prepare(process_spec)) {
-        std::fprintf(stderr, "Could not prepare the ordered VST3 processor chain.\\n");
+        std::fprintf(stderr, "Could not prepare the ordered VST3 processor chain.\n");
         return -EINVAL;
     }
 

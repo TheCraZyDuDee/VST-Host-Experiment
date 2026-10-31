@@ -61,7 +61,7 @@ cmake --build build-vst3-gui
 ./build-vst3-gui/vst-host-gui
 ```
 
-The GUI lets you add multiple `.vst3` bundle directories to an ordered processing chain, drag entries to reorder them (or use the Move up/Move down controls), remove entries, and open the selected plugin's editor. It also lets you specify a PipeWire input node id/name (or leave it empty for the default microphone), configure gain and requested latency, and start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
+The GUI lets you add multiple `.vst3` bundle directories to an ordered processing chain, drag entries to reorder them (or use the Move up/Move down controls), remove entries, and open the selected plugin's editor. The chain and audio routing/gain/latency settings are saved between launches using the desktop settings store. It also lets you specify a PipeWire input node id/name (or leave it empty for the default microphone), configure gain and requested latency, and start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
 
 
 The first configure downloads the SDK and its required source submodules; later builds reuse them in the CMake build directory. VSTGUI and the SDK's example plugins are disabled because this headless host does not need them. To use an SDK checkout you already have instead, pass `-DVST3_SDK_ROOT=/path/to/vst3sdk` with `-DVST_HOST_ENABLE_VST3=ON`. VST3 hosting stays optional, so the normal build does not need a network connection or the SDK. The SDK is distributed under the terms in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
@@ -86,7 +86,7 @@ The output source is intended to appear in applications' microphone/input-device
 
 - No device picker yet; `--input` accepts a PipeWire target id/name, and the default source is used otherwise.
 - Stereo F32 input is requested at 48 kHz. Compatibility with mono-only devices and other negotiated formats still needs testing.
-- Plug-in state persistence, generic parameter controls, meters, and device enumeration are not implemented. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.
+- Plug-in-internal state persistence, generic parameter controls, meters, and device enumeration are not implemented. The GUI does persist plugin bundle order and host audio settings. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.
 - The chain is prepared before the PipeWire real-time callback starts; its process path performs ordered in-place processing without chain allocation or locking. Real-world CPU use, cumulative plugin latency, and device compatibility still need measurement on a PipeWire system.
 
 See [architecture notes](docs/architecture.md) and [roadmap](docs/roadmap.md).

@@ -494,6 +494,8 @@ public:
         status_ = new QLabel(tr("Ready. Choose a plugin to begin."), central);
         status_->setWordWrap(true);
         root->addWidget(status_);
+        diagnostics_ = new QLabel(tr("Audio diagnostics: not running"), central);
+        root->addWidget(diagnostics_);
         auto* note = new QLabel(
             tr("Plugin editor embedding currently requires the Qt X11 (xcb) platform. "
                "Wayland-native editor embedding is not implemented yet."), central);

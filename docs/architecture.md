@@ -10,12 +10,12 @@
 
 ## Current audio prototype
 
-The current prototype uses PipeWire's native C API:
+The current prototype uses PipeWire's native C API and a pre-prepared ordered processor chain:
 
 - A capture stream requests interleaved 32-bit float stereo audio at 48 kHz.
 - A fixed-capacity single-producer/single-consumer ring buffer separates the capture callback from the virtual-source callback.
 - Both streams request a configurable PipeWire node latency (256 frames by default at 48 kHz); PipeWire and client graph settings may override the effective interval.
-- The source callback applies a fixed gain (or bypasses it), emits silence on underrun, and discards excessive stale queue backlog to avoid long delayed playback after suspension.
+- The source callback runs each VST3 effect in chain order, then applies fixed gain (or bypasses it), emits silence on underrun, and discards excessive stale queue backlog to avoid long delayed playback after suspension.
 - The output node is configured with `media.class = Audio/Source/Virtual` and a configurable node name.
 
 The ring buffer avoids locks and dynamic allocation in both callbacks. Producer overflow drops incoming frames; if the consumer falls far behind, it skips old queued frames and keeps a small scheduling cushion. Underruns are filled with silence. Latency still needs measurement on the target system.

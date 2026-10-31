@@ -61,7 +61,7 @@ cmake --build build-vst3-gui
 ./build-vst3-gui/vst-host-gui
 ```
 
-The GUI lets you select a `.vst3` bundle directory, specify a PipeWire input node id/name (or leave it empty for the default microphone), configure gain and requested latency, and start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
+The GUI lets you add multiple `.vst3` bundle directories to an ordered processing chain, drag entries to reorder them (or use the Move up/Move down controls), remove entries, and open the selected plugin's editor. The chain and audio routing/gain/latency settings are saved between launches using the desktop settings store. It also lets you specify a PipeWire input node id/name (or leave it empty for the default microphone), configure gain and requested latency, and start/stop the virtual microphone. Use **Open plugin editor** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. The command-line `vst-host` target is still built alongside the GUI.
 
 
 The first configure downloads the SDK and its required source submodules; later builds reuse them in the CMake build directory. VSTGUI and the SDK's example plugins are disabled because this headless host does not need them. To use an SDK checkout you already have instead, pass `-DVST3_SDK_ROOT=/path/to/vst3sdk` with `-DVST_HOST_ENABLE_VST3=ON`. VST3 hosting stays optional, so the normal build does not need a network connection or the SDK. The SDK is distributed under the terms in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
@@ -72,13 +72,13 @@ The application must run inside a logged-in desktop/user session with PipeWire a
 ./build/vst-host --input NODE_ID_OR_NAME --name vst-host-mic --gain 1.0
 ```
 
-Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, `--plugin /path/to/Effect.vst3` loads one native Linux VST3 audio effect before the gain stage. For example:
+Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, repeat `--plugin` to load multiple native Linux VST3 audio effects in series, in command-line order, before the gain stage. For example:
 
 ```sh
 ./build-vst3/vst-host --input NODE_ID_OR_NAME --plugin /path/to/Effect.vst3 --name vst-host-mic
 ```
 
-The first integration supports the plug-in’s first stereo audio input/output bus only. `--latency-frames 128` is the default and requests a 128-frame PipeWire interval (about 2.67 ms at 48 kHz). If you hear dropouts, try `256` (5.33 ms), `512` (10.67 ms), or `1024` (21.33 ms). On shutdown, the host reports dropped and underrun frame counts as a basic troubleshooting diagnostic. This is a request, not a guarantee: actual latency depends on the PipeWire graph and the receiving application. The host also discards stale queued audio if the virtual microphone was suspended, rather than replaying a large backlog. Gain and latency are set at startup, not changed interactively. Stop with Ctrl+C.
+Each plugin instance currently supports its first main audio input/output bus with mono/stereo negotiation; the chain passes stereo audio between instances, adapting mono plugin layouts at each plugin boundary. `--latency-frames 128` is the default and requests a 128-frame PipeWire interval (about 2.67 ms at 48 kHz). If you hear dropouts, try `256` (5.33 ms), `512` (10.67 ms), or `1024` (21.33 ms). On shutdown, the host reports dropped and underrun frame counts as a basic troubleshooting diagnostic. This is a request, not a guarantee: actual latency depends on the PipeWire graph and the receiving application. The host also discards stale queued audio if the virtual microphone was suspended, rather than replaying a large backlog. Gain and latency are set at startup, not changed interactively. Stop with Ctrl+C.
 
 The output source is intended to appear in applications' microphone/input-device lists as **VST Host Virtual Microphone** (or the name supplied with `--name`). This needs verification on the target distribution and PipeWire version; if the node is exposed as an application stream instead of a selectable source, the virtual-source publication strategy will need adjustment.
 
@@ -86,7 +86,7 @@ The output source is intended to appear in applications' microphone/input-device
 
 - No device picker yet; `--input` accepts a PipeWire target id/name, and the default source is used otherwise.
 - Stereo F32 input is requested at 48 kHz. Compatibility with mono-only devices and other negotiated formats still needs testing.
-- Multi-plugin chains, plug-in state persistence, generic parameter controls, meters, and device enumeration are not implemented. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.
-- The prototype has not been compiled or measured on a real PipeWire system, so latency, CPU use, and device compatibility are not yet established.
+- Plug-in-internal state persistence, generic parameter controls, meters, and device enumeration are not implemented. The GUI does persist plugin bundle order and host audio settings. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.
+- The chain is prepared before the PipeWire real-time callback starts; its process path performs ordered in-place processing without chain allocation or locking. Real-world CPU use, cumulative plugin latency, and device compatibility still need measurement on a PipeWire system.
 
 See [architecture notes](docs/architecture.md) and [roadmap](docs/roadmap.md).

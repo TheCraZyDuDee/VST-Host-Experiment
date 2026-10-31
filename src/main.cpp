@@ -17,7 +17,7 @@ void print_usage(const char* executable) {
         << "Options:\n"
         << "  --input NODE       PipeWire microphone node id/name (default: default source)\n"
         << "  --name NODE_NAME   Virtual microphone node name\n"
-        << "  --plugin PATH      Load a native Linux VST3 effect bundle (optional)\n"
+        << "  --plugin PATH      Add a VST3 effect to the chain; repeat to add more\n"
         << "  --gain VALUE       Linear gain from 0.0 to 4.0 (default: 1.0)\n"
         << "  --latency-frames N 128, 256, 512, or 1024 (default: 128)\n"
         << "  --bypass           Bypass the gain processor\n"
@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
                     std::cerr << "Plugin path cannot be empty.\n";
                     return 2;
                 }
-                options.plugin_path = value;
+                options.plugin_paths.emplace_back(value);
             } else if (arg == "--gain") {
                 if (!parse_gain(value, options.gain)) {
                     std::cerr << "Gain must be a number between 0.0 and 4.0.\n";

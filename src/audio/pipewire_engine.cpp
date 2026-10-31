@@ -1,6 +1,7 @@
 #include "pipewire_engine.hpp"
 
 #include "stereo_ring_buffer.hpp"
+#include "processor_chain.hpp"
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
 
@@ -33,7 +34,8 @@ struct EngineState {
     pw_stream* source_stream{};
     StereoRingBuffer ring;
     GainProcessor processor;
-    std::shared_ptr<Vst3Processor> plugin_processor;
+    std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
+    ProcessorChain processor_chain;
     std::size_t latency_frames{128};
     int setup_error{0};
 };
@@ -100,9 +102,7 @@ void on_source_process(void* userdata) {
         auto* samples = reinterpret_cast<float*>(data.data);
 
         state->ring.pop_interleaved(samples, frames, state->latency_frames * 2);
-        if (state->plugin_processor) {
-            state->plugin_processor->process(samples, frames);
-        }
+        state->processor_chain.process(samples, frames);
         state->processor.process(samples, frames);
 
         data.chunk->offset = 0;
@@ -307,6 +307,15 @@ Vst3Processor* PipeWireEngine::plugin_processor() const noexcept {
     return impl_ ? impl_->published_plugin.load(std::memory_order_acquire) : nullptr;
 }
 
+Vst3Processor* PipeWireEngine::plugin_processor(std::size_t index) const noexcept {
+    if (!impl_ || index >= impl_->state.plugin_chain.size()) return nullptr;
+    return impl_->state.plugin_chain[index].get();
+}
+
+std::size_t PipeWireEngine::plugin_count() const noexcept {
+    return impl_ ? impl_->state.plugin_chain.size() : 0;
+}
+
 int PipeWireEngine::run() {
     int argc = 0;
     char* arguments[] = {nullptr};
@@ -340,17 +349,28 @@ int PipeWireEngine::run() {
     pw_loop_add_signal(pw_main_loop_get_loop(impl_->state.loop), SIGTERM,
                        request_shutdown, &impl_->state);
 
-    if (!impl_->options.plugin_path.empty()) {
-        auto plugin = impl_->options.preloaded_plugin;
-        if (!plugin) {
-            plugin = std::make_shared<Vst3Processor>(impl_->options.plugin_path);
-        }
+    auto plugin_paths = impl_->options.plugin_paths;
+    auto preloaded_plugins = impl_->options.preloaded_plugins;
+    if (plugin_paths.empty() && !impl_->options.plugin_path.empty())
+        plugin_paths.push_back(impl_->options.plugin_path);
+    if (preloaded_plugins.empty() && impl_->options.preloaded_plugin)
+        preloaded_plugins.push_back(impl_->options.preloaded_plugin);
+    if (preloaded_plugins.size() > plugin_paths.size()) {
+        std::fprintf(stderr, "More preloaded VST3 instances than plugin paths were supplied.\n");
+        return -EINVAL;
+    }
+    impl_->state.plugin_chain.reserve(plugin_paths.size());
+    for (std::size_t index = 0; index < plugin_paths.size(); ++index) {
+        auto plugin = index < preloaded_plugins.size() ? preloaded_plugins[index] : nullptr;
+        if (!plugin) plugin = std::make_shared<Vst3Processor>(plugin_paths[index]);
         std::string plugin_error;
         if (!plugin->load(plugin_error)) {
-            std::fprintf(stderr, "Could not load VST3 plugin: %s\n", plugin_error.c_str());
+            std::fprintf(stderr, "Could not load VST3 plugin %zu ('%s'): %s\n",
+                         index + 1, plugin_paths[index].c_str(), plugin_error.c_str());
             return -EINVAL;
         }
-        impl_->state.plugin_processor = std::move(plugin);
+        impl_->state.processor_chain.add(*plugin);
+        impl_->state.plugin_chain.push_back(std::move(plugin));
     }
 
     const AudioProcessSpec process_spec{sample_rate, channel_count, 1024};
@@ -358,9 +378,8 @@ int PipeWireEngine::run() {
         std::fprintf(stderr, "Could not prepare audio processor.\n");
         return -EINVAL;
     }
-    if (impl_->state.plugin_processor &&
-        !impl_->state.plugin_processor->prepare(process_spec)) {
-        std::fprintf(stderr, "Could not prepare the VST3 plugin for stereo 48 kHz audio.\n");
+    if (!impl_->state.processor_chain.prepare(process_spec)) {
+        std::fprintf(stderr, "Could not prepare the ordered VST3 processor chain.\n");
         return -EINVAL;
     }
 
@@ -368,8 +387,8 @@ int PipeWireEngine::run() {
     if (result == 0) {
         result = impl_->create_capture_stream();
     }
-    if (result == 0 && impl_->state.plugin_processor) {
-        impl_->published_plugin.store(impl_->state.plugin_processor.get(), std::memory_order_release);
+    if (result == 0 && !impl_->state.plugin_chain.empty()) {
+        impl_->published_plugin.store(impl_->state.plugin_chain.front().get(), std::memory_order_release);
     }
     if (result == 0) {
         std::printf("Virtual microphone: %s\n", impl_->options.output_name.c_str());
@@ -381,10 +400,10 @@ int PipeWireEngine::run() {
         std::printf("Requested latency: %zu frames (%.2f ms at 48 kHz)\n",
                     impl_->options.latency_frames,
                     1000.0 * static_cast<double>(impl_->options.latency_frames) / sample_rate);
-        if (impl_->state.plugin_processor) {
-            std::printf("VST3 plugin: %s\n", impl_->options.plugin_path.c_str());
-            std::printf("Plugin latency: %u frames\n",
-                        impl_->state.plugin_processor->latency_frames());
+        for (std::size_t index = 0; index < impl_->state.plugin_chain.size(); ++index) {
+            const auto& plugin = impl_->state.plugin_chain[index];
+            std::printf("VST3 chain %zu: %s (latency %u frames)\n",
+                        index + 1, plugin->plugin_path().c_str(), plugin->latency_frames());
         }
         std::printf("Press Ctrl+C to stop.\n");
         pw_main_loop_run(impl_->state.loop);

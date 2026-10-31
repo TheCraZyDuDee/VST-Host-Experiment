@@ -44,6 +44,7 @@ public:
     [[nodiscard]] Vst3Processor* plugin_processor(std::size_t index) const noexcept;
     [[nodiscard]] std::size_t plugin_count() const noexcept;
     [[nodiscard]] std::string plugin_path(std::size_t index) const;
+    [[nodiscard]] std::string last_error() const;
 
 private:
     struct Impl;

@@ -33,7 +33,8 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
             error = "Invalid configuration at line " + std::to_string(line_number);
             return false;
         }
-        const auto key_end = line.find_last_not_of(" \\t", equals - 1);\n        const auto key = line.substr(first, key_end - first + 1);
+        const auto key_end = line.find_last_not_of(" \t", equals - 1);
+        const auto key = line.substr(first, key_end - first + 1);
         std::istringstream value_stream(line.substr(equals + 1));
         if (key == "gain") {
             float value{};

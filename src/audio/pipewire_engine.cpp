@@ -38,7 +38,6 @@ struct EngineState {
     GainProcessor processor;
     std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
     std::vector<std::string> plugin_paths;
-    std::string last_error;
     ProcessorChain processor_chain;
     std::size_t latency_frames{128};
     int setup_error{0};
@@ -158,6 +157,7 @@ struct PipeWireEngine::Impl {
 
     PipeWireOptions options;
     EngineState state;
+    std::string last_error;
     spa_hook capture_listener{};
     spa_hook source_listener{};
     bool initialized{false};

@@ -24,6 +24,7 @@ public:
         std::size_t prepared_count = 0;
         for (auto* processor : processors_) {
             if (processor == nullptr || !processor->prepare(spec)) {
+                if (processor != nullptr) processor->reset();
                 while (prepared_count > 0) processors_[--prepared_count]->reset();
                 return false;
             }

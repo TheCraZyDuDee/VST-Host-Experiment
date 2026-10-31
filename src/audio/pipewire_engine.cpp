@@ -5,6 +5,7 @@
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
 #include "plugin_discovery.hpp"
+#include "yabridge_manager.hpp"
 
 #include <pipewire/pipewire.h>
 
@@ -318,6 +319,12 @@ std::size_t PipeWireEngine::plugin_count() const noexcept {
 }
 
 int PipeWireEngine::run() {
+    std::string bridge_error;
+    if (!prepare_windows_vst3_plugins(impl_->options, bridge_error)) {
+        std::fprintf(stderr, "Windows VST3 setup failed: %s\n", bridge_error.c_str());
+        return -ENOENT;
+    }
+
     int argc = 0;
     char* arguments[] = {nullptr};
     char** argv = arguments;

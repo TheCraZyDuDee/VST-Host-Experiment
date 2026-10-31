@@ -455,8 +455,12 @@ public:
         chainList_->setMinimumHeight(130);
         chainList_->setSelectionMode(QAbstractItemView::SingleSelection);
         chainList_->setDragDropMode(QAbstractItemView::InternalMove);
+        chainList_->setToolTip(tr("Select an active effect; double-click it to open its editor while audio runs."));
         root->addWidget(new QLabel(tr("Processing chain (top to bottom)"), central));
         root->addWidget(chainList_, 1);
+        selectedPluginLabel_ = new QLabel(tr("No effect selected"), central);
+        selectedPluginLabel_->setWordWrap(true);
+        root->addWidget(selectedPluginLabel_);
         auto* chainActions = new QHBoxLayout();
         removePluginButton_ = new QPushButton(tr("Remove selected"), central);
         moveUpButton_ = new QPushButton(tr("Move up"), central);
@@ -549,7 +553,7 @@ public:
         auto* actions = new QHBoxLayout();
         startButton_ = new QPushButton(tr("Start audio"), central);
         stopButton_ = new QPushButton(tr("Stop audio"), central);
-        editorButton_ = new QPushButton(tr("Open plugin editor"), central);
+        editorButton_ = new QPushButton(tr("Edit selected effect"), central);
         stopButton_->setEnabled(false);
         editorButton_->setEnabled(false);
         actions->addWidget(startButton_);
@@ -599,6 +603,10 @@ public:
         connect(startButton_, &QPushButton::clicked, this, [this] { startAudio(); });
         connect(stopButton_, &QPushButton::clicked, this, [this] { stopAudio(); });
         connect(editorButton_, &QPushButton::clicked, this, [this] { openEditor(); });
+        connect(chainList_, &QListWidget::currentRowChanged, this,
+                [this](int) { updateSelectedPlugin(); });
+        connect(chainList_, &QListWidget::itemDoubleClicked, this,
+                [this](QListWidgetItem*) { if (editorButton_->isEnabled()) openEditor(); });
 
         pollTimer_ = new QTimer(this);
         pollTimer_->setInterval(200);
@@ -646,7 +654,11 @@ private:
     }
 
     void setEditingEnabled(bool enabled) {
-        chainList_->setEnabled(enabled);
+        // Freeze reordering while the engine runs but keep rows selectable:
+        // selecting the next plugin must not require restarting the audio.
+        chainList_->setEnabled(enabled || engine_ != nullptr);
+        chainList_->setDragDropMode(enabled
+            ? QAbstractItemView::InternalMove : QAbstractItemView::NoDragDrop);
         availablePlugins_->setEnabled(enabled);
         addPluginButton_->setEnabled(enabled);
         addSelectedPluginButton_->setEnabled(enabled);
@@ -895,6 +907,7 @@ private:
         options.windows_plugin_directories.clear();
 
         previousDiagnostics_ = {};
+        engineReadyShown_ = false;
         engine_ = std::make_unique<vst_host::audio::PipeWireEngine>(std::move(options));
         engineFinished_.store(false, std::memory_order_release);
         engineResult_ = 0;
@@ -911,10 +924,7 @@ private:
     }
 
     void stopAudio() {
-        if (editorDialog_) {
-            editorDialog_->close();
-            editorDialog_ = nullptr;
-        }
+        closeEditorDialog();
         if (engine_) engine_->request_stop();
         if (worker_.joinable()) worker_.join();
         engine_.reset();
@@ -923,15 +933,40 @@ private:
         setEditingEnabled(true);
         editorButton_->setEnabled(false);
         status_->setText(tr("Audio engine stopped."));
+        updateSelectedPlugin();
         saveSettings();
     }
 
+    void closeEditorDialog() {
+        if (!editorDialog_) return;
+        auto* dialog = editorDialog_.data();
+        editorDialog_ = nullptr;
+        editorIndex_ = -1;
+        dialog->detachEditor(); // release native editor before stopping the engine
+        dialog->close();
+    }
+
+    void updateSelectedPlugin() {
+        const auto* item = chainList_->currentItem();
+        selectedPluginLabel_->setText(item
+            ? tr("Selected: %1 — double-click to edit while running")
+                .arg(QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName() +
+                     (item->data(Qt::UserRole + 1).toBool() ? tr(" (WINE)") : QString()))
+            : tr("No effect selected"));
+        const bool ready = engine_ && engine_->plugin_processor() != nullptr &&
+            chainList_->currentRow() >= 0 &&
+            static_cast<std::size_t>(chainList_->currentRow()) < engine_->plugin_count();
+        editorButton_->setEnabled(ready);
+    }
+
     void openEditor() {
-        if (editorDialog_) {
+        const int selectedIndex = chainList_->currentRow();
+        if (editorDialog_ && editorIndex_ == selectedIndex) {
             editorDialog_->raise();
             editorDialog_->activateWindow();
             return;
         }
+        closeEditorDialog();
         if (QGuiApplication::platformName() != QStringLiteral("xcb")) {
             QMessageBox::information(
                 this, tr("X11 editor embedding required"),
@@ -940,8 +975,7 @@ private:
                     .arg(QGuiApplication::platformName()));
             return;
         }
-        if (!engine_) return;
-        const int selectedIndex = chainList_->currentRow();
+        if (!engine_ || engine_->plugin_processor() == nullptr) return;
         if (selectedIndex < 0) {
             QMessageBox::information(this, tr("Select a plugin"),
                                      tr("Select a chain entry to open its editor."));
@@ -955,6 +989,9 @@ private:
         }
 
         auto* dialog = new PluginEditorDialog(processor, this);
+        if (auto* item = chainList_->item(selectedIndex))
+            dialog->setWindowTitle(tr("Effect %1: %2").arg(selectedIndex + 1).arg(
+                QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName()));
         QString error;
         if (!dialog->attachEditor(error)) {
             dialog->close();
@@ -963,8 +1000,14 @@ private:
             return;
         }
         editorDialog_ = dialog;
+        editorIndex_ = selectedIndex;
         dialog->setAttribute(Qt::WA_DeleteOnClose);
-        connect(dialog, &QDialog::finished, this, [this] { editorDialog_ = nullptr; });
+        connect(dialog, &QDialog::finished, this, [this, dialog] {
+            if (editorDialog_ == dialog) {
+                editorDialog_ = nullptr;
+                editorIndex_ = -1;
+            }
+        });
     }
 
     QString inputTargetValue() const {
@@ -1030,10 +1073,7 @@ private:
         if (!engine_) return;
         if (engineFinished_.load(std::memory_order_acquire)) {
             const auto engineError = engine_->last_error();
-            if (editorDialog_) {
-                editorDialog_->close();
-                editorDialog_ = nullptr;
-            }
+            closeEditorDialog();
             if (worker_.joinable()) worker_.join();
             engine_.reset();
             startButton_->setEnabled(true);
@@ -1067,8 +1107,11 @@ private:
                 .arg(static_cast<qulonglong>(stats.stale_frames))
                 .arg(static_cast<qulonglong>(newStale)));
         if (engine_->plugin_processor() != nullptr) {
-            editorButton_->setEnabled(chainList_->currentRow() >= 0);
-            status_->setText(tr("Audio is running. Plugin editor is available."));
+            updateSelectedPlugin();
+            if (!engineReadyShown_) {
+                status_->setText(tr("Audio is running. Select or double-click a chain effect to edit it."));
+                engineReadyShown_ = true;
+            }
         }
     }
 
@@ -1097,6 +1140,7 @@ private:
     QPushButton* startButton_{};
     QPushButton* stopButton_{};
     QPushButton* editorButton_{};
+    QLabel* selectedPluginLabel_{};
     QLabel* status_{};
     QLabel* diagnostics_{};
     QTimer* pollTimer_{};
@@ -1108,6 +1152,8 @@ private:
     std::atomic<bool> engineFinished_{false};
     int engineResult_{0};
     QPointer<PluginEditorDialog> editorDialog_;
+    int editorIndex_{-1};
+    bool engineReadyShown_{false};
 };
 
 } // namespace

@@ -17,7 +17,7 @@ struct PipeWireOptions {
     std::string output_name{"vst-host-virtual-mic"};
     std::string output_description{"VST Host Virtual Microphone"};
     // Ordered VST3 effects. Legacy single-plugin fields remain supported.
-    std::vector<std::string> plugin_paths;
+    std::vector<std::string> plugin_paths;\n    // Search roots for native Linux VST3 bundle directories.\n    std::vector<std::string> plugin_directories;
     std::vector<std::shared_ptr<Vst3Processor>> preloaded_plugins;
     std::string plugin_path;
     std::shared_ptr<Vst3Processor> preloaded_plugin;

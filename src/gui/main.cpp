@@ -834,6 +834,7 @@ private:
         options.plugin_directories.clear();
         options.windows_plugin_directories.clear();
 
+        previousDiagnostics_ = {};
         engine_ = std::make_unique<vst_host::audio::PipeWireEngine>(std::move(options));
         engineFinished_.store(false, std::memory_order_release);
         engineResult_ = 0;
@@ -987,10 +988,24 @@ private:
             return;
         }
         const auto stats = engine_->diagnostics();
-        diagnostics_->setText(tr("Audio buffers — missing: %1; overflow: %2; stale trimmed: %3 frames")
-                                  .arg(static_cast<qulonglong>(stats.underrun_frames))
-                                  .arg(static_cast<qulonglong>(stats.dropped_frames))
-                                  .arg(static_cast<qulonglong>(stats.stale_frames)));
+        // Distinguish ever-increasing cumulative totals from new loss over the
+        // most recent UI polling period (normally 200 ms).
+        const auto newUnderrun = stats.underrun_frames >= previousDiagnostics_.underrun_frames
+            ? stats.underrun_frames - previousDiagnostics_.underrun_frames : 0;
+        const auto newOverflow = stats.dropped_frames >= previousDiagnostics_.dropped_frames
+            ? stats.dropped_frames - previousDiagnostics_.dropped_frames : 0;
+        const auto newStale = stats.stale_frames >= previousDiagnostics_.stale_frames
+            ? stats.stale_frames - previousDiagnostics_.stale_frames : 0;
+        previousDiagnostics_ = stats;
+        diagnostics_->setText(
+            tr("Audio frames (total / last poll): missing %1 / +%2; "
+               "overflow %3 / +%4; stale trimmed %5 / +%6")
+                .arg(static_cast<qulonglong>(stats.underrun_frames))
+                .arg(static_cast<qulonglong>(newUnderrun))
+                .arg(static_cast<qulonglong>(stats.dropped_frames))
+                .arg(static_cast<qulonglong>(newOverflow))
+                .arg(static_cast<qulonglong>(stats.stale_frames))
+                .arg(static_cast<qulonglong>(newStale)));
         if (engine_->plugin_processor() != nullptr) {
             editorButton_->setEnabled(chainList_->currentRow() >= 0);
             status_->setText(tr("Audio is running. Plugin editor is available."));
@@ -1029,6 +1044,7 @@ private:
     std::thread worker_;
     std::future<std::pair<std::vector<vst_host::audio::PipeWireInputDevice>, std::string>> deviceScanFuture_;
     bool deviceScanPending_{false};
+    vst_host::audio::AudioDiagnostics previousDiagnostics_{};
     std::atomic<bool> engineFinished_{false};
     int engineResult_{0};
     QPointer<PluginEditorDialog> editorDialog_;

@@ -59,16 +59,20 @@ inline void on_core_error(void* userdata, std::uint32_t id, int, int result,
     }
 }
 
-inline const pw_registry_events registry_events = {
-    PW_VERSION_REGISTRY_EVENTS,
-    .global = on_registry_global,
-};
+inline const pw_registry_events registry_events = [] {
+    pw_registry_events events{};
+    events.version = PW_VERSION_REGISTRY_EVENTS;
+    events.global = on_registry_global;
+    return events;
+}();
 
-inline const pw_core_events core_events = {
-    PW_VERSION_CORE_EVENTS,
-    .done = on_core_done,
-    .error = on_core_error,
-};
+inline const pw_core_events core_events = [] {
+    pw_core_events events{};
+    events.version = PW_VERSION_CORE_EVENTS;
+    events.done = on_core_done;
+    events.error = on_core_error;
+    return events;
+}();
 
 } // namespace detail
 

@@ -14,6 +14,7 @@ int main() {
     source.bypass = true;
     source.plugin_paths = {"/plugins/First Effect.vst3", "/plugins/Second.vst3"};
     source.plugin_directories = {"/plugins/effects", "/home/user/custom-vst3"};
+    source.windows_plugin_directories = {"/home/user/.wine/drive_c/Program Files/Common Files/VST3"};
 
     std::string error;
     assert(vst_host::audio::save_config(path, source, error));
@@ -26,6 +27,7 @@ int main() {
     assert(restored.bypass == source.bypass);
     assert(restored.plugin_paths == source.plugin_paths);
     assert(restored.plugin_directories == source.plugin_directories);
+    assert(restored.windows_plugin_directories == source.windows_plugin_directories);
 
     std::filesystem::remove(path);
     return 0;

@@ -37,6 +37,7 @@ struct EngineState {
     StereoRingBuffer ring;
     GainProcessor processor;
     std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
+    std::vector<std::string> plugin_paths;
     ProcessorChain processor_chain;
     std::size_t latency_frames{128};
     int setup_error{0};
@@ -318,6 +319,11 @@ std::size_t PipeWireEngine::plugin_count() const noexcept {
     return impl_ ? impl_->state.plugin_chain.size() : 0;
 }
 
+std::string PipeWireEngine::plugin_path(std::size_t index) const {
+    if (!impl_ || index >= impl_->state.plugin_paths.size()) return {};
+    return impl_->state.plugin_paths[index];
+}
+
 int PipeWireEngine::run() {
     std::string bridge_error;
     if (!prepare_windows_vst3_plugins(impl_->options, bridge_error)) {
@@ -385,6 +391,7 @@ int PipeWireEngine::run() {
             return -EINVAL;
         }
         impl_->state.processor_chain.add(*plugin);
+        impl_->state.plugin_paths.push_back(plugin_paths[index]);
         impl_->state.plugin_chain.push_back(std::move(plugin));
     }
 

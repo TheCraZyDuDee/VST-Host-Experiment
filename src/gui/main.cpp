@@ -357,8 +357,8 @@ public:
         pluginPath_ = new QLineEdit(pluginRow);
         pluginPath_->setPlaceholderText(tr("Select a native Linux .vst3 bundle"));
         pluginLayout->addWidget(pluginPath_, 1);
-        auto* addPlugin = new QPushButton(tr("Add effect"), pluginRow);
-        pluginLayout->addWidget(addPlugin);
+        addPluginButton_ = new QPushButton(tr("Add effect"), pluginRow);
+        pluginLayout->addWidget(addPluginButton_);
         form->addRow(tr("Plugin bundle"), pluginRow);
 
         chainList_ = new QListWidget(central);
@@ -419,7 +419,7 @@ public:
         root->addWidget(note);
         setCentralWidget(central);
 
-        connect(addPlugin, &QPushButton::clicked, this, [this] {
+        connect(addPluginButton_, &QPushButton::clicked, this, [this] {
             const auto path = QFileDialog::getExistingDirectory(
                 this, tr("Add VST3 effect bundle"), pluginPath_->text());
             if (!path.isEmpty()) {
@@ -551,6 +551,11 @@ private:
 
         startButton_->setEnabled(false);
         stopButton_->setEnabled(true);
+        chainList_->setEnabled(false);
+        addPluginButton_->setEnabled(false);
+        removePluginButton_->setEnabled(false);
+        moveUpButton_->setEnabled(false);
+        moveDownButton_->setEnabled(false);
         editorButton_->setEnabled(false);
         status_->setText(tr("Starting audio engine…"));
     }
@@ -565,6 +570,11 @@ private:
         engine_.reset();
         startButton_->setEnabled(true);
         stopButton_->setEnabled(false);
+        chainList_->setEnabled(true);
+        addPluginButton_->setEnabled(true);
+        removePluginButton_->setEnabled(true);
+        moveUpButton_->setEnabled(true);
+        moveDownButton_->setEnabled(true);
         editorButton_->setEnabled(false);
         status_->setText(tr("Audio engine stopped."));
     }
@@ -635,6 +645,7 @@ private:
 
     QLineEdit* pluginPath_{};
     QListWidget* chainList_{};
+    QPushButton* addPluginButton_{};
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};
     QPushButton* moveDownButton_{};

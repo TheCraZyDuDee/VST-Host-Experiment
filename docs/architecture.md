@@ -55,3 +55,12 @@ The plugin scanner in `src/audio/plugin_discovery.hpp` recursively searches conf
 ## Input device enumeration
 
 The optional Qt frontend queries the PipeWire registry on startup and on explicit refresh. It lists current `Audio/Source` and `Audio/Source/Virtual` nodes, displays descriptions and current node ids, and stores the selected `node.name` as the persistent target rather than the transient registry id. Enumeration runs on a worker thread and completes before its result is applied to widgets; it is never performed by an audio callback. The editable combo permits manual node-name entry, and an empty target retains PipeWire's default-source autoconnect behavior. Hotplug changes are reflected after pressing Refresh.
+
+
+## Windows VST3 startup integration
+
+When `windows_plugin_directories` is non-empty, `PipeWireEngine::run()` invokes `yabridgectl add` for each configured directory and then `yabridgectl sync` before creating the PipeWire streams. It resolves the generated VST3 wrapper directory from `yabridgectl status` (falling back to `~/.vst3/yabridge`) and adds that directory to the normal Linux VST3 scanner. The wrapper plugins therefore pass through the same VST3 processor and ordered chain as native Linux plugins. This work happens on the engine startup thread, never in the real-time callback.
+
+The Qt UI stores Windows plugin directories separately and lets the user start with only Windows plugin paths configured. Once the engine has loaded the chain, newly discovered wrapper paths are reflected in the chain list for editor access and future configuration saves. The CLI accepts repeated `--windows-plugin-dir PATH` arguments; `.vsthost` files use repeated `windows_plugin_directory` keys.
+
+The host does not install Wine or yabridge. `yabridgectl` must be available on `PATH`, at `~/.local/share/yabridge/yabridgectl`, or via the `YABRIDGECTL` environment variable. The host invokes yabridgectl as an external process without linking or vendoring its GPL-3.0-or-later implementation. `yabridgectl sync` operates on its global registered directory list, which may be shared with other audio hosts; this application does not automatically remove directories from that external list.

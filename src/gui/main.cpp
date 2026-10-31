@@ -14,6 +14,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPushButton>
@@ -342,7 +343,7 @@ class MainWindow final : public QMainWindow {
 public:
     MainWindow() {
         setWindowTitle(tr("VST Host Experiment"));
-        resize(680, 390);
+        resize(760, 620);
 
         auto* central = new QWidget(this);
         auto* root = new QVBoxLayout(central);
@@ -356,7 +357,23 @@ public:
         auto* browse = new QPushButton(tr("Browse…"), pluginRow);
         pluginLayout->addWidget(pluginPath_, 1);
         pluginLayout->addWidget(browse);
-        form->addRow(tr("VST3 plugin"), pluginRow);
+        auto* addPlugin = new QPushButton(tr("Add effect"), pluginRow);
+        pluginLayout->addWidget(addPlugin);
+        form->addRow(tr("Plugin bundle"), pluginRow);
+
+        chainList_ = new QListWidget(central);
+        chainList_->setSelectionMode(QAbstractItemView::SingleSelection);
+        chainList_->setDragDropMode(QAbstractItemView::InternalMove);
+        root->addWidget(new QLabel(tr("Processing chain (top to bottom)"), central));
+        root->addWidget(chainList_, 1);
+        auto* chainActions = new QHBoxLayout();
+        removePluginButton_ = new QPushButton(tr("Remove selected"), central);
+        moveUpButton_ = new QPushButton(tr("Move up"), central);
+        moveDownButton_ = new QPushButton(tr("Move down"), central);
+        chainActions->addWidget(removePluginButton_);
+        chainActions->addWidget(moveUpButton_);
+        chainActions->addWidget(moveDownButton_);
+        root->addLayout(chainActions);
 
         inputTarget_ = new QLineEdit(central);
         inputTarget_->setPlaceholderText(tr("Leave empty to use the default microphone"));
@@ -428,12 +445,20 @@ protected:
     }
 
 private:
+    void moveSelectedPlugin(int offset) {
+        const int row = chainList_->currentRow();
+        const int target = row + offset;
+        if (row < 0 || target < 0 || target >= chainList_->count()) return;
+        auto* item = chainList_->takeItem(row);
+        chainList_->insertItem(target, item);
+        chainList_->setCurrentRow(target);
+    }
+
     void startAudio() {
         if (worker_.joinable()) worker_.join();
-        const auto pluginPath = pluginPath_->text().trimmed();
-        if (pluginPath.isEmpty()) {
-            QMessageBox::warning(this, tr("Plugin required"),
-                                 tr("Choose a native Linux VST3 bundle first."));
+        if (chainList_->count() == 0) {
+            QMessageBox::warning(this, tr("Plugin chain is empty"),
+                                 tr("Add at least one native Linux VST3 effect to the chain."));
             return;
         }
         if (outputName_->text().trimmed().isEmpty()) {
@@ -443,7 +468,8 @@ private:
         }
 
         vst_host::audio::PipeWireOptions options;
-        options.plugin_path = pluginPath.toStdString();
+        for (int i = 0; i < chainList_->count(); ++i)
+            options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
         options.input_target = inputTarget_->text().trimmed().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;
@@ -451,14 +477,18 @@ private:
         options.latency_frames = latency_->currentText().toUInt();
         options.bypass = bypass_->isChecked();
 
-        auto plugin = std::make_shared<vst_host::audio::Vst3Processor>(pluginPath.toStdString());
-        std::string pluginError;
-        if (!plugin->load(pluginError)) {
-            QMessageBox::critical(this, tr("Could not load plugin"),
-                                  QString::fromStdString(pluginError));
-            return;
+        options.preloaded_plugins.reserve(options.plugin_paths.size());
+        for (std::size_t i = 0; i < options.plugin_paths.size(); ++i) {
+            auto plugin = std::make_shared<vst_host::audio::Vst3Processor>(options.plugin_paths[i]);
+            std::string pluginError;
+            if (!plugin->load(pluginError)) {
+                QMessageBox::critical(
+                    this, tr("Could not load plugin %1").arg(i + 1),
+                    QString::fromStdString(pluginError));
+                return;
+            }
+            options.preloaded_plugins.push_back(std::move(plugin));
         }
-        options.preloaded_plugin = std::move(plugin);
 
         engine_ = std::make_unique<vst_host::audio::PipeWireEngine>(std::move(options));
         engineFinished_.store(false, std::memory_order_release);
@@ -503,7 +533,7 @@ private:
             return;
         }
         if (!engine_) return;
-        auto* processor = engine_->plugin_processor();
+        const int selectedIndex = chainList_->currentRow();\n        if (selectedIndex < 0) {\n            QMessageBox::information(this, tr("Select a plugin"), tr("Select a chain entry to open its editor."));\n            return;\n        }\n        auto* processor = engine_->plugin_processor(static_cast<std::size_t>(selectedIndex));
         if (processor == nullptr) {
             QMessageBox::warning(this, tr("Plugin not ready"),
                                  tr("Wait for the plugin to finish loading, then try again."));
@@ -546,7 +576,7 @@ private:
         }
     }
 
-    QLineEdit* pluginPath_{};
+    QLineEdit* pluginPath_{};\n    QListWidget* chainList_{};\n    QPushButton* removePluginButton_{};\n    QPushButton* moveUpButton_{};\n    QPushButton* moveDownButton_{};
     QLineEdit* inputTarget_{};
     QLineEdit* outputName_{};
     QDoubleSpinBox* gain_{};

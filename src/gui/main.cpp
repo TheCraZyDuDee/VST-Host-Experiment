@@ -837,6 +837,7 @@ private:
         }
         if (!engine_) return;
         if (engineFinished_.load(std::memory_order_acquire)) {
+            const auto engineError = engine_->last_error();
             if (editorDialog_) {
                 editorDialog_->close();
                 editorDialog_ = nullptr;
@@ -851,9 +852,11 @@ private:
             removePluginButton_->setEnabled(true);
             moveUpButton_->setEnabled(true);
             moveDownButton_->setEnabled(true);
-            status_->setText(engineResult_ == 0
-                                 ? tr("Audio engine stopped.")
-                                 : tr("Audio engine exited with an error. See the terminal output for details."));
+            status_->setText(!engineError.empty()
+                                 ? QString::fromStdString(engineError)
+                                 : (engineResult_ == 0
+                                        ? tr("Audio engine stopped.")
+                                        : tr("Audio engine exited with an error. See the terminal output for details.")));
             return;
         }
         if (engine_->plugin_processor() != nullptr) {

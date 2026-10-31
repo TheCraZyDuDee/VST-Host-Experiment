@@ -376,6 +376,15 @@ public:
         chainActions->addWidget(moveDownButton_);
         root->addLayout(chainActions);
 
+        auto* configActions = new QHBoxLayout();
+        auto* loadConfigButton = new QPushButton(tr("Load configuration…"), central);
+        auto* saveConfigButton = new QPushButton(tr("Save configuration…"), central);
+        configActions->addWidget(loadConfigButton);
+        configActions->addWidget(saveConfigButton);
+        root->addLayout(configActions);
+        connect(loadConfigButton, &QPushButton::clicked, this, [this] { loadConfiguration(); });
+        connect(saveConfigButton, &QPushButton::clicked, this, [this] { saveConfiguration(); });
+
         inputTarget_ = new QLineEdit(central);
         inputTarget_->setPlaceholderText(tr("Leave empty to use the default microphone"));
         form->addRow(tr("PipeWire input target"), inputTarget_);

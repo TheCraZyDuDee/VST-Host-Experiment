@@ -12,6 +12,13 @@ int main() {
     const vst_host::audio::AudioProcessSpec spec{48000, 2, 128};
     assert(!processor.prepare(spec));
     assert(processor.latency_frames() == 0);
+    // The generic VST3 parameter API must degrade safely when the SDK/plug-in
+    // is unavailable, rather than dereferencing an absent editor controller.
+    assert(processor.editor_parameters().empty());
+    assert(!processor.set_editor_parameter(123, 0.5));
+    assert(!processor.set_editor_parameter(123, -0.1));
+    assert(!processor.set_editor_parameter(123, 1.1));
+
 
     float samples[] = {0.25F, -0.5F, 0.75F, -1.0F};
     processor.process(samples, 2);

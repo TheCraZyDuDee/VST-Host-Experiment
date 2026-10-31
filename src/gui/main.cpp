@@ -599,8 +599,6 @@ private:
             options.plugin_directories.push_back(pluginDirectories_->item(i)->text().toStdString());
         for (int i = 0; i < windowsPluginDirectories_->count(); ++i)
             options.windows_plugin_directories.push_back(windowsPluginDirectories_->item(i)->text().toStdString());
-        for (int i = 0; i < windowsPluginDirectories_->count(); ++i)
-            options.windows_plugin_directories.push_back(windowsPluginDirectories_->item(i)->text().toStdString());
         options.input_target = inputTargetValue().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;
@@ -709,6 +707,8 @@ private:
             options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
         for (int i = 0; i < pluginDirectories_->count(); ++i)
             options.plugin_directories.push_back(pluginDirectories_->item(i)->text().toStdString());
+        for (int i = 0; i < windowsPluginDirectories_->count(); ++i)
+            options.windows_plugin_directories.push_back(windowsPluginDirectories_->item(i)->text().toStdString());
         options.input_target = inputTargetValue().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;

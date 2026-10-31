@@ -469,10 +469,19 @@ public:
         }
         // Keep this Qt dialog and its selector alive. Only the embedded VST3
         // view and X11 socket are replaced, avoiding the combo box UAF.
+        auto* previousProcessor = processor_;
+        const int previousIndex = activeIndex_;
         detachEditor();
         processor_ = processor;
         if (!attachEditor(error)) {
-            selector_->setCurrentIndex(activeIndex_);
+            // Restore the previous view if the requested editor cannot attach.
+            // Otherwise the selector and audio-chain selection would disagree.
+            detachEditor();
+            processor_ = previousProcessor;
+            QString restorationError;
+            (void)attachEditor(restorationError);
+            activeIndex_ = previousIndex;
+            selector_->setCurrentIndex(previousIndex);
             return false;
         }
         activeIndex_ = index;

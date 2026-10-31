@@ -134,6 +134,11 @@ if(BUILD_TESTING)
     target_compile_features(config-test PRIVATE cxx_std_20)
     add_test(NAME config-test COMMAND config-test)
 
+    add_executable(plugin-discovery-test tests/plugin_discovery_test.cpp)
+    target_include_directories(plugin-discovery-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(plugin-discovery-test PRIVATE cxx_std_20)
+    add_test(NAME plugin-discovery-test COMMAND plugin-discovery-test)
+
     add_executable(processor-chain-test tests/processor_chain_test.cpp)
     target_include_directories(processor-chain-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(processor-chain-test PRIVATE cxx_std_20)

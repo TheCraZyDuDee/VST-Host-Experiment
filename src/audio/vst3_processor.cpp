@@ -45,10 +45,12 @@ public:
         if (!controller_) return Steinberg::kResultFalse;
         // Editor and DSP may be separate objects/processes (notably yabridge).
         // Updating the controller alone does not update the audio processor.
-        const auto result = controller_->setParamNormalized(id, value);
-        if (result == Steinberg::kResultOk)
-            (void)pending_.push(id, value); // bounded; never waits on audio thread
-        return result;
+        // Some plug-ins have already updated their controller before calling
+        // performEdit and may return false for a redundant set. The host must
+        // nevertheless deliver the explicit edit to the DSP.
+        (void)controller_->setParamNormalized(id, value);
+        (void)pending_.push(id, value); // bounded; never waits on audio thread
+        return Steinberg::kResultOk;
     }
     Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
         return Steinberg::kResultOk;

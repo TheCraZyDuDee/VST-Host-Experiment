@@ -38,3 +38,10 @@ PipeWire format negotiation, mono devices, node exposure in different desktop en
 Implement and test native Linux plugins first. The initial VST3 adapter uses the Steinberg hosting SDK when `VST3_SDK_ROOT` is supplied at configure time; the SDK is optional and the default build remains SDK-free. It loads one audio-effect class from a selected bundle and currently supports the first stereo input/output bus. Plug-in discovery, multi-effect chains, controller/editor support, state persistence, and robust bus negotiation remain future work. The audio callback uses preallocated planar scratch buffers to adapt the host’s interleaved stereo format to VST3’s process API. Third-party plug-ins are not guaranteed to be real-time safe, and this initial adapter still requires build and runtime validation with real Linux effects. VST2 support requires a separate licensing/distribution review.
 
 Windows-only plugins are out of scope for the first working prototype. A later Wine-based compatibility layer would require its own helper process, diagnostics, and per-plugin compatibility tests; it must not be a prerequisite for native Linux use.
+
+
+## Portable host configurations
+
+The CLI and optional Qt frontend share the line-oriented `.vsthost` format implemented in `src/audio/config.hpp`. It stores the PipeWire input target, virtual-source name, gain, requested latency, gain bypass, and an ordered list of native VST3 bundle paths. String values are quoted and escaped; repeated `plugin` keys preserve chain order. Unknown keys and invalid values fail loading rather than being silently ignored.
+
+The GUI's Load/Save configuration actions import and export this format. The CLI accepts `--config FILE` to start the same setup without Qt, and `--save-config FILE` to export the effective options. This is the supported lightweight background/headless path; it still runs inside the user's PipeWire session and does not require a GUI process. The file does not yet include plugin-internal controller/component state or plugin directory search paths.

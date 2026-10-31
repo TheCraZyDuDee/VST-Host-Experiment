@@ -503,6 +503,7 @@ public:
         pollTimer_->setInterval(200);
         connect(pollTimer_, &QTimer::timeout, this, [this] { pollEngine(); });
         loadSettings();
+        refreshInputDevices();
         pollTimer_->start();
     }
 

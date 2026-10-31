@@ -649,6 +649,10 @@ private:
     }
 
     void startAudio() {
+        if (deviceScanPending_) {
+            status_->setText(tr("Wait for microphone discovery to finish before starting audio."));
+            return;
+        }
         if (worker_.joinable()) worker_.join();
         saveSettings();
         if (chainList_->count() == 0) {
@@ -773,7 +777,7 @@ private:
     }
 
     void refreshInputDevices() {
-        if (deviceScanPending_) return;
+        if (deviceScanPending_ || engine_) return;
         deviceScanPending_ = true;
         status_->setText(tr("Scanning PipeWire input devices…"));
         deviceScanFuture_ = std::async(std::launch::async, [] {

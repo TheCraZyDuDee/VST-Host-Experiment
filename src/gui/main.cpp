@@ -250,6 +250,25 @@ private:
                     }
                 }
                 break;
+            case ReparentNotify:
+                // Bridged plug-ins often create the editor in another X11
+                // process and reparent it into our socket. That does not
+                // generate CreateNotify on the socket: observe it explicitly.
+                if (event.xreparent.parent == window_ && children_.empty()) {
+                    const Window child = event.xreparent.window;
+                    children_.push_back(child);
+                    sendEmbeddedNotify(child);
+                    XMapWindow(display_, child);
+                    XMoveResizeWindow(display_, child, 0, 0,
+                                      static_cast<unsigned int>(lastWidth_),
+                                      static_cast<unsigned int>(lastHeight_));
+                    if (focusOwner_ && focusOwner_->hasFocus()) focusPlugin();
+                    XFlush(display_);
+                } else if (event.xreparent.parent != window_) {
+                    children_.erase(std::remove(children_.begin(), children_.end(),
+                                                event.xreparent.window), children_.end());
+                }
+                break;
             case MapRequest:
                 std::fprintf(stderr, "[VST3 XEmbed] MapRequest for window=0x%llx.\n",
                              static_cast<unsigned long long>(event.xmaprequest.window));
@@ -400,7 +419,9 @@ public:
         surface_->resize(width, height);
         xembed_->resizeTo(width, height);
         resize(width + 24, height + 48);
+        surface_->setFocus(Qt::OtherFocusReason);
         xembed_->setActive(isActiveWindow());
+        xembed_->focusPlugin();
         return true;
     }
 

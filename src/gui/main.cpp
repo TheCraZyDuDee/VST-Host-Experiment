@@ -27,6 +27,8 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSlider>
+#include <QTabWidget>
 #include <QFrame>
 #include <QSettings>
 #include <QPointer>
@@ -47,6 +49,7 @@
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <vector>
 #include <utility>
 
@@ -375,21 +378,86 @@ public:
                         if (alive) selectEffect(index);
                     });
                 });
-        surface_ = new QWidget(this);
+        tabs_ = new QTabWidget(this);
+        auto* nativePage = new QWidget(tabs_);
+        auto* nativeLayout = new QVBoxLayout(nativePage);
+        nativeLayout->setContentsMargins(0, 0, 0, 0);
+        surface_ = new QWidget(nativePage);
         surface_->setAttribute(Qt::WA_NativeWindow);
         surface_->setFocusPolicy(Qt::StrongFocus);
         surface_->installEventFilter(this);
         surface_->setMinimumSize(320, 180);
-        layout->addWidget(surface_);
-        resize(480, 320);
+        nativeLayout->addWidget(surface_);
+        tabs_->addTab(nativePage, tr("Plugin UI"));
+        parameterScroll_ = new QScrollArea(tabs_);
+        parameterScroll_->setWidgetResizable(true);
+        tabs_->addTab(parameterScroll_, tr("Parameters (host controls)"));
+        layout->addWidget(tabs_);
+        resize(560, 400);
     }
 
     ~PluginEditorDialog() override { detachEditor(); }
 
     void detachEditor() {
+        // Discard old controls before releasing the editor controller. Their
+        // valueChanged handlers must not call a destroyed controller.
+        if (parameterScroll_) delete parameterScroll_->takeWidget();
         if (processor_ != nullptr && attached_) processor_->close_editor();
         attached_ = false;
         xembed_.reset();
+    }
+
+    void rebuildParameterPanel() {
+        if (!parameterScroll_ || !processor_) return;
+        auto* panel = new QWidget(parameterScroll_);
+        auto* controls = new QVBoxLayout(panel);
+        auto* hint = new QLabel(
+            tr("Host-provided controls for VST3 parameters. If a Wine editor draws "
+               "but ignores mouse input, try these sliders instead. Some plugins "
+               "do not expose every custom control as a VST3 parameter."), panel);
+        hint->setWordWrap(true);
+        controls->addWidget(hint);
+
+        const auto parameters = processor_->editor_parameters();
+        if (parameters.empty()) {
+            auto* empty = new QLabel(
+                tr("This effect did not report any standard VST3 parameters."), panel);
+            empty->setWordWrap(true);
+            controls->addWidget(empty);
+        }
+
+        for (const auto& parameter : parameters) {
+            auto* row = new QWidget(panel);
+            auto* line = new QHBoxLayout(row);
+            line->setContentsMargins(2, 2, 2, 2);
+            QString name = QString::fromStdU16String(parameter.name);
+            if (name.isEmpty()) name = tr("Parameter %1").arg(parameter.id);
+            auto* label = new QLabel(name, row);
+            label->setMinimumWidth(155);
+            line->addWidget(label);
+
+            auto* slider = new QSlider(Qt::Horizontal, row);
+            const int steps = parameter.step_count > 0 && parameter.step_count <= 4096
+                ? parameter.step_count : 1000;
+            slider->setRange(0, steps);
+            slider->setValue(static_cast<int>(std::lround(
+                std::clamp(parameter.normalized_value, 0.0, 1.0) * steps)));
+            slider->setEnabled(!parameter.read_only);
+            line->addWidget(slider, 1);
+            auto* valueLabel = new QLabel(
+                QString::number(parameter.normalized_value, 'f', 3), row);
+            valueLabel->setMinimumWidth(50);
+            line->addWidget(valueLabel);
+            connect(slider, &QSlider::valueChanged, row,
+                    [this, id = parameter.id, steps, valueLabel](int value) {
+                const double normalized = static_cast<double>(value) / steps;
+                valueLabel->setText(QString::number(normalized, 'f', 3));
+                if (processor_) (void)processor_->set_editor_parameter(id, normalized);
+            });
+            controls->addWidget(row);
+        }
+        controls->addStretch();
+        parameterScroll_->setWidget(panel);
     }
 
     bool switchProcessor(vst_host::audio::Vst3Processor* processor, int index,
@@ -469,6 +537,7 @@ public:
         surface_->setFocus(Qt::OtherFocusReason);
         xembed_->setActive(isActiveWindow());
         xembed_->focusPlugin();
+        rebuildParameterPanel();
         return true;
     }
 
@@ -478,6 +547,8 @@ private:
     int activeIndex_{-1};
     bool windowInitialized_{false};
     QWidget* surface_{};
+    QTabWidget* tabs_{};
+    QScrollArea* parameterScroll_{};
     std::unique_ptr<XEmbedSurface> xembed_;
     bool attached_{false};
 };

@@ -51,7 +51,7 @@ public:
             const auto discard = available - frames - max_backlog_frames;
             read += discard;
             read_index_.store(read, std::memory_order_release);
-            dropped_frames_.fetch_add(discard, std::memory_order_relaxed);
+            stale_frames_.fetch_add(discard, std::memory_order_relaxed);
             available -= discard;
         }
 
@@ -94,6 +94,10 @@ public:
         return dropped_frames_.load(std::memory_order_relaxed);
     }
 
+    [[nodiscard]] std::uint64_t stale_frames() const noexcept {
+        return stale_frames_.load(std::memory_order_relaxed);
+    }
+
     [[nodiscard]] std::uint64_t underrun_frames() const noexcept {
         return underrun_frames_.load(std::memory_order_relaxed);
     }
@@ -103,6 +107,7 @@ private:
     alignas(64) std::atomic<std::uint64_t> write_index_{0};
     alignas(64) std::atomic<std::uint64_t> read_index_{0};
     std::atomic<std::uint64_t> dropped_frames_{0};
+    std::atomic<std::uint64_t> stale_frames_{0};
     std::atomic<std::uint64_t> underrun_frames_{0};
 };
 

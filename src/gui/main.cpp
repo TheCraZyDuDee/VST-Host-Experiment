@@ -15,6 +15,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QAbstractItemView>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPushButton>

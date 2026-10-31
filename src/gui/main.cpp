@@ -987,9 +987,10 @@ private:
             return;
         }
         const auto stats = engine_->diagnostics();
-        diagnostics_->setText(tr("Buffer diagnostics — underrun: %1 frames; dropped: %2 frames")
+        diagnostics_->setText(tr("Audio buffers — missing: %1; overflow: %2; stale trimmed: %3 frames")
                                   .arg(static_cast<qulonglong>(stats.underrun_frames))
-                                  .arg(static_cast<qulonglong>(stats.dropped_frames)));
+                                  .arg(static_cast<qulonglong>(stats.dropped_frames))
+                                  .arg(static_cast<qulonglong>(stats.stale_frames)));
         if (engine_->plugin_processor() != nullptr) {
             editorButton_->setEnabled(chainList_->currentRow() >= 0);
             status_->setText(tr("Audio is running. Plugin editor is available."));

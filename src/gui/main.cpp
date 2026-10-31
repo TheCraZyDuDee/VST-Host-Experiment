@@ -355,9 +355,7 @@ public:
         pluginLayout->setContentsMargins(0, 0, 0, 0);
         pluginPath_ = new QLineEdit(pluginRow);
         pluginPath_->setPlaceholderText(tr("Select a native Linux .vst3 bundle"));
-        auto* browse = new QPushButton(tr("Browse…"), pluginRow);
         pluginLayout->addWidget(pluginPath_, 1);
-        pluginLayout->addWidget(browse);
         auto* addPlugin = new QPushButton(tr("Add effect"), pluginRow);
         pluginLayout->addWidget(addPlugin);
         form->addRow(tr("Plugin bundle"), pluginRow);
@@ -420,10 +418,24 @@ public:
         root->addWidget(note);
         setCentralWidget(central);
 
-        connect(browse, &QPushButton::clicked, this, [this] {
+        connect(addPlugin, &QPushButton::clicked, this, [this] {
             const auto path = QFileDialog::getExistingDirectory(
-                this, tr("Select VST3 bundle"), pluginPath_->text());
-            if (!path.isEmpty()) pluginPath_->setText(path);
+                this, tr("Add VST3 effect bundle"), pluginPath_->text());
+            if (!path.isEmpty()) {
+                chainList_->addItem(path);
+                chainList_->setCurrentRow(chainList_->count() - 1);
+                pluginPath_->setText(path);
+            }
+        });
+        connect(removePluginButton_, &QPushButton::clicked, this, [this] {
+            const int row = chainList_->currentRow();
+            if (row >= 0) delete chainList_->takeItem(row);
+        });
+        connect(moveUpButton_, &QPushButton::clicked, this, [this] {
+            moveSelectedPlugin(-1);
+        });
+        connect(moveDownButton_, &QPushButton::clicked, this, [this] {
+            moveSelectedPlugin(1);
         });
         connect(startButton_, &QPushButton::clicked, this, [this] { startAudio(); });
         connect(stopButton_, &QPushButton::clicked, this, [this] { stopAudio(); });

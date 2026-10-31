@@ -2,10 +2,13 @@
 
 #include "pipewire_engine.hpp"
 
+#include <algorithm>
 #include <cerrno>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -145,19 +148,22 @@ inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& 
 
     std::string status_output;
     std::string status_error;
-    if (detail::run_yabridge_command({yabridgectl, "status"}, status_output, status_error)) {
-        const auto location = detail::parse_vst3_location(status_output);
-        if (!location.empty() &&
-            std::find(options.plugin_directories.begin(), options.plugin_directories.end(),
-                      location) == options.plugin_directories.end())
-            options.plugin_directories.push_back(location);
+    std::string wrapper_directory;
+    if (detail::run_yabridge_command({yabridgectl, "status"}, status_output, status_error))
+        wrapper_directory = detail::parse_vst3_location(status_output);
+    if (wrapper_directory.empty()) {
+        if (const char* home = std::getenv("HOME"); home && *home)
+            wrapper_directory = (std::filesystem::path(home) / ".vst3/yabridge").string();
     }
-
-    if (options.plugin_directories.empty() ||
-        options.plugin_directories.back().empty()) {
-        error = "yabridge synchronized, but its VST3 wrapper directory could not be located.";
+    std::error_code wrapper_error;
+    if (wrapper_directory.empty() ||
+        !std::filesystem::is_directory(wrapper_directory, wrapper_error) || wrapper_error) {
+        error = "yabridge synchronized, but its generated VST3 wrapper directory could not be located.";
         return false;
     }
+    if (std::find(options.plugin_directories.begin(), options.plugin_directories.end(),
+                  wrapper_directory) == options.plugin_directories.end())
+        options.plugin_directories.push_back(wrapper_directory);
     return true;
 }
 

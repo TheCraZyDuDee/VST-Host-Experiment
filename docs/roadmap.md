@@ -20,6 +20,7 @@
 - [ ] Support runtime gain/bypass changes using bounded real-time-safe control transfer.
 - [x] Add ordered processor chains, mono/stereo adaptation between VST3 stages, and cumulative plugin-latency reporting.
 - [x] Persist plugin chain order and host audio routing/gain/latency settings in the Qt UI.
+- [x] Add portable configuration import/export shared by GUI and CLI; run saved configurations headlessly.
 - [ ] Add persisted plugin-internal state and device settings.
 
 ## Phase 3 — Native plugins
@@ -34,10 +35,11 @@
 ## Phase 4 — User interface
 - [x] Add an optional Qt 6 UI with VST3 editor hosting; headless build remains independent.
 - [x] Plugin chain editor, gain bypass, and engine status.
-- [ ] Device enumeration/selection, plugin bypass, and input/output meters.
+- [ ] PipeWire device enumeration/selection, plugin bypass, and input/output meters.
 - [ ] Ensure the app remains usable headlessly.
 
 ## Phase 5 — Later research
+- [ ] Add configurable plugin-directory scanning and discovery.
 - [ ] Assess Wine-based hosting for Windows plugins without requiring users to manage a bridge manually.
 - [ ] Prototype compatibility in an isolated helper process.
 - [ ] Document unsupported plugins and failure behavior.

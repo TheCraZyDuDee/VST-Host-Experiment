@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <cmath>
 #include <memory>
 #include <vector>
 #include <cstdint>
@@ -379,6 +380,51 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
     std::fprintf(stderr, "[VST3 editor] Host attachment succeeded; requested view size=%dx%d.\n",
                  width, height);
     return true;
+#endif
+}
+
+std::vector<Vst3Processor::ParameterInfo> Vst3Processor::editor_parameters() const {
+    std::vector<ParameterInfo> result;
+#if defined(VST_HOST_ENABLE_VST3)
+    if (!impl_ || !impl_->editor_controller) return result;
+    auto* controller = impl_->editor_controller.get();
+    const auto count = controller->getParameterCount();
+    // A bound prevents a malfunctioning bridge/controller from populating
+    // unbounded amounts of native Qt widgets.
+    result.reserve(static_cast<std::size_t>(std::clamp(count, Steinberg::int32{0},
+                                                        Steinberg::int32{512})));
+    for (Steinberg::int32 i = 0; i < count && i < 512; ++i) {
+        Steinberg::Vst::ParameterInfo native{};
+        if (controller->getParameterInfo(i, native) != Steinberg::kResultOk)
+            continue;
+        ParameterInfo param;
+        param.id = native.id;
+        for (const auto ch : native.title) {
+            if (ch == 0) break;
+            param.name.push_back(static_cast<char16_t>(ch));
+        }
+        param.step_count = native.stepCount;
+        param.read_only = (native.flags & Steinberg::Vst::ParameterInfo::kIsReadOnly) != 0;
+        param.normalized_value = controller->getParamNormalized(native.id);
+        result.push_back(std::move(param));
+    }
+#endif
+    return result;
+}
+
+bool Vst3Processor::set_editor_parameter(std::uint32_t id, double normalized_value) {
+#if !defined(VST_HOST_ENABLE_VST3)
+    (void)id;
+    (void)normalized_value;
+    return false;
+#else
+    if (!impl_ || !impl_->editor_controller || !std::isfinite(normalized_value) ||
+        normalized_value < 0.0 || normalized_value > 1.0) return false;
+
+    // Called only on the UI thread. Updating the controller is not sufficient
+    // for DSP, so always submit the value to the audio callback as well.
+    (void)impl_->editor_controller->setParamNormalized(id, normalized_value);
+    return impl_->pending_parameter_changes.push(id, normalized_value);
 #endif
 }
 

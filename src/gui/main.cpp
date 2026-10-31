@@ -22,6 +22,7 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
 #include <QPointer>
 #include <QTimer>
@@ -368,6 +369,7 @@ public:
         form->addRow(tr("Plugin bundle"), pluginRow);
 
         availablePlugins_ = new QListWidget(central);
+        availablePlugins_->setMinimumHeight(130);
         availablePlugins_->setSelectionMode(QAbstractItemView::SingleSelection);
         root->addWidget(new QLabel(tr("Available plugins (from individual bundles and search directories)"), central));
         root->addWidget(availablePlugins_, 1);
@@ -381,6 +383,7 @@ public:
         connect(refreshPluginListButton, &QPushButton::clicked, this, [this] { scanPluginDirectories(); });
 
         chainList_ = new QListWidget(central);
+        chainList_->setMinimumHeight(130);
         chainList_->setSelectionMode(QAbstractItemView::SingleSelection);
         chainList_->setDragDropMode(QAbstractItemView::InternalMove);
         root->addWidget(new QLabel(tr("Processing chain (top to bottom)"), central));
@@ -515,7 +518,11 @@ public:
                "Wayland-native editor embedding is not implemented yet."), central);
         note->setWordWrap(true);
         root->addWidget(note);
-        setCentralWidget(central);
+        auto* scrollArea = new QScrollArea(this);
+        scrollArea->setWidgetResizable(true);
+        scrollArea->setFrameShape(QFrame::NoFrame);
+        scrollArea->setWidget(central);
+        setCentralWidget(scrollArea);
 
         connect(addPluginButton_, &QPushButton::clicked, this, [this] {
             const auto path = QFileDialog::getExistingDirectory(

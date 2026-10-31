@@ -41,6 +41,6 @@
 
 ## Phase 5 — Later research
 - [x] Add configurable plugin-directory scanning and discovery.
-- [ ] Assess Wine-based hosting for Windows plugins without requiring users to manage a bridge manually.
-- [ ] Prototype compatibility in an isolated helper process.
+- [x] Integrate optional Wine/yabridge setup and Windows VST3 wrapper loading; see [Windows VST3 bridge documentation](windows-vst3-bridge.md).
+- [ ] Add bridge lifecycle monitoring and failure isolation.
 - [ ] Document unsupported plugins and failure behavior.

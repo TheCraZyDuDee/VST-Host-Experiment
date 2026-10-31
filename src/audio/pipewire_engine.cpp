@@ -104,7 +104,11 @@ void on_source_process(void* userdata) {
         }
         auto* samples = reinterpret_cast<float*>(data.data);
 
-        state->ring.pop_interleaved(samples, frames, state->latency_frames * 2);
+        // Allow a small scheduling cushion: a tight two-period cap can discard
+        // valid microphone samples on every callback with mismatched quanta.
+        // Old audio is still trimmed if capture gets far ahead of playback.
+        state->ring.pop_interleaved(samples, frames,
+            std::max<std::size_t>(4096, state->latency_frames * 8));
         state->processor_chain.process(samples, frames);
         state->processor.process(samples, frames);
 
@@ -333,6 +337,7 @@ AudioDiagnostics PipeWireEngine::diagnostics() const noexcept {
     if (!impl_) return {};
     return AudioDiagnostics{
         .dropped_frames = impl_->state.ring.dropped_frames(),
+        .stale_frames = impl_->state.ring.stale_frames(),
         .underrun_frames = impl_->state.ring.underrun_frames(),
     };
 }
@@ -446,11 +451,14 @@ int PipeWireEngine::run() {
         result = impl_->state.setup_error;
         const auto dropped = impl_->state.ring.dropped_frames();
         const auto underruns = impl_->state.ring.underrun_frames();
-        std::printf("Audio diagnostics: dropped=%llu frames (%.2f ms), underrun=%llu frames (%.2f ms)\n",
+        const auto stale = impl_->state.ring.stale_frames();
+        std::printf("Audio diagnostics: overflow=%llu frames (%.2f ms), underrun=%llu frames (%.2f ms), stale-trimmed=%llu frames (%.2f ms)\n",
                     static_cast<unsigned long long>(dropped),
                     1000.0 * static_cast<double>(dropped) / sample_rate,
                     static_cast<unsigned long long>(underruns),
-                    1000.0 * static_cast<double>(underruns) / sample_rate);
+                    1000.0 * static_cast<double>(underruns) / sample_rate,
+                    static_cast<unsigned long long>(stale),
+                    1000.0 * static_cast<double>(stale) / sample_rate);
     }
 
     return result;

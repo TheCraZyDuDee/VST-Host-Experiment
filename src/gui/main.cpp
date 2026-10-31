@@ -471,12 +471,12 @@ public:
         root->addLayout(chainActions);
 
         auto* configActions = new QHBoxLayout();
-        auto* loadConfigButton = new QPushButton(tr("Load configuration…"), central);
+        loadConfigButton_ = new QPushButton(tr("Load configuration…"), central);
         auto* saveConfigButton = new QPushButton(tr("Save configuration…"), central);
-        configActions->addWidget(loadConfigButton);
+        configActions->addWidget(loadConfigButton_);
         configActions->addWidget(saveConfigButton);
         root->addLayout(configActions);
-        connect(loadConfigButton, &QPushButton::clicked, this, [this] { loadConfiguration(); });
+        connect(loadConfigButton_, &QPushButton::clicked, this, [this] { loadConfiguration(); });
         connect(saveConfigButton, &QPushButton::clicked, this, [this] { saveConfiguration(); });
 
         root->addWidget(new QLabel(tr("Plugin search directories (Linux and Wine)"), central));
@@ -671,6 +671,7 @@ private:
         addWindowsDirectoryButton_->setEnabled(enabled);
         removeDirectoryButton_->setEnabled(enabled);
         scanDirectoriesButton_->setEnabled(enabled);
+        loadConfigButton_->setEnabled(enabled);
     }
 
     void loadSettings() {
@@ -848,6 +849,7 @@ private:
     }
 
     void loadConfiguration() {
+        if (engine_ || pluginScanPending_) return;
         const auto path = QFileDialog::getOpenFileName(
             this, tr("Load host configuration"), QString(),
             tr("VST Host configuration (*.vsthost);;All files (*)"));
@@ -1129,6 +1131,7 @@ private:
     QPushButton* addWindowsDirectoryButton_{};
     QPushButton* removeDirectoryButton_{};
     QPushButton* scanDirectoriesButton_{};
+    QPushButton* loadConfigButton_{};
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};
     QPushButton* moveDownButton_{};

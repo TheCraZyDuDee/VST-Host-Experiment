@@ -1,4 +1,5 @@
 #include "audio/pipewire_engine.hpp"
+#include "audio/config.hpp"
 #include "audio/vst3_processor.hpp"
 
 #include <QApplication>
@@ -493,6 +494,61 @@ private:
         settings.setValue(QStringLiteral("gainBypassed"), bypass_->isChecked());
         settings.endGroup();
         settings.sync();
+    }
+
+    vst_host::audio::PipeWireOptions optionsFromUi() const {
+        vst_host::audio::PipeWireOptions options;
+        for (int i = 0; i < chainList_->count(); ++i)
+            options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
+        options.input_target = inputTarget_->text().trimmed().toStdString();
+        options.output_name = outputName_->text().trimmed().toStdString();
+        options.output_description = options.output_name;
+        options.gain = static_cast<float>(gain_->value());
+        options.latency_frames = latency_->currentText().toUInt();
+        options.bypass = bypass_->isChecked();
+        return options;
+    }
+
+    void applyOptions(const vst_host::audio::PipeWireOptions& options) {
+        chainList_->clear();
+        for (const auto& path : options.plugin_paths)
+            chainList_->addItem(QString::fromStdString(path));
+        inputTarget_->setText(QString::fromStdString(options.input_target));
+        outputName_->setText(QString::fromStdString(options.output_name));
+        gain_->setValue(options.gain);
+        latency_->setCurrentText(QString::number(options.latency_frames));
+        bypass_->setChecked(options.bypass);
+        if (chainList_->count() > 0) chainList_->setCurrentRow(0);
+    }
+
+    void loadConfiguration() {
+        const auto path = QFileDialog::getOpenFileName(
+            this, tr("Load host configuration"), QString(),
+            tr("VST Host configuration (*.vsthost);;All files (*)"));
+        if (path.isEmpty()) return;
+        auto options = vst_host::audio::PipeWireOptions{};
+        std::string error;
+        if (!vst_host::audio::load_config(path.toStdString(), options, error)) {
+            QMessageBox::critical(this, tr("Configuration could not be loaded"),
+                                  QString::fromStdString(error));
+            return;
+        }
+        applyOptions(options);
+        saveSettings();
+    }
+
+    void saveConfiguration() {
+        const auto path = QFileDialog::getSaveFileName(
+            this, tr("Save host configuration"), QStringLiteral("vst-host.vsthost"),
+            tr("VST Host configuration (*.vsthost)"));
+        if (path.isEmpty()) return;
+        std::string error;
+        if (!vst_host::audio::save_config(path.toStdString(), optionsFromUi(), error)) {
+            QMessageBox::critical(this, tr("Configuration could not be saved"),
+                                  QString::fromStdString(error));
+            return;
+        }
+        status_->setText(tr("Configuration saved."));
     }
 
     void moveSelectedPlugin(int offset) {

@@ -43,6 +43,7 @@
 #include <cstdlib>
 #include <memory>
 #include <future>
+#include <functional>
 #include <thread>
 #include <algorithm>
 #include <chrono>
@@ -347,10 +348,23 @@ private:
 class PluginEditorDialog final : public QDialog {
 public:
     explicit PluginEditorDialog(vst_host::audio::Vst3Processor* processor,
+                                const QStringList& effectNames, int selectedIndex,
+                                std::function<void(int)> selectEffect,
                                 QWidget* parent = nullptr)
         : QDialog(parent), processor_(processor) {
         setWindowTitle(tr("VST3 Plugin Editor"));
         auto* layout = new QVBoxLayout(this);
+        auto* selectorRow = new QHBoxLayout();
+        selectorRow->addWidget(new QLabel(tr("Edit effect:"), this));
+        auto* selector = new QComboBox(this);
+        selector->addItems(effectNames);
+        selector->setCurrentIndex(selectedIndex);
+        selectorRow->addWidget(selector, 1);
+        layout->addLayout(selectorRow);
+        connect(selector, QOverload<int>::of(&QComboBox::activated), this,
+                [selectedIndex, selectEffect = std::move(selectEffect)](int index) {
+                    if (index != selectedIndex && selectEffect) selectEffect(index);
+                });
         surface_ = new QWidget(this);
         surface_->setAttribute(Qt::WA_NativeWindow);
         surface_->setFocusPolicy(Qt::StrongFocus);
@@ -1011,7 +1025,20 @@ private:
             return;
         }
 
-        auto* dialog = new PluginEditorDialog(processor, this);
+        QStringList effectNames;
+        for (int i = 0; i < chainList_->count(); ++i) {
+            auto* item = chainList_->item(i);
+            effectNames << tr("%1. %2%3")
+                .arg(i + 1)
+                .arg(QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName())
+                .arg(item->data(Qt::UserRole + 1).toBool() ? tr(" (WINE)") : QString());
+        }
+        auto* dialog = new PluginEditorDialog(processor, effectNames, selectedIndex,
+            [this](int index) {
+                if (!engine_ || index < 0 || index >= chainList_->count()) return;
+                chainList_->setCurrentRow(index);
+                openEditor();
+            }, this);
         if (auto* item = chainList_->item(selectedIndex))
             dialog->setWindowTitle(tr("Effect %1: %2").arg(selectedIndex + 1).arg(
                 QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName()));

@@ -1,5 +1,6 @@
 #include "audio/pipewire_engine.hpp"
 #include "audio/config.hpp"
+#include "audio/pipewire_devices.hpp"
 #include "audio/plugin_discovery.hpp"
 #include "audio/vst3_processor.hpp"
 
@@ -35,8 +36,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <future>
 #include <thread>
 #include <algorithm>
+#include <chrono>
 #include <vector>
 
 namespace {
@@ -421,9 +424,17 @@ public:
             saveSettings();
         });
 
-        inputTarget_ = new QLineEdit(central);
-        inputTarget_->setPlaceholderText(tr("Leave empty to use the default microphone"));
-        form->addRow(tr("PipeWire input target"), inputTarget_);
+        auto* inputRow = new QWidget(central);
+        auto* inputLayout = new QHBoxLayout(inputRow);
+        inputLayout->setContentsMargins(0, 0, 0, 0);
+        inputDevice_ = new QComboBox(inputRow);
+        inputDevice_->setEditable(true);
+        inputDevice_->lineEdit()->setPlaceholderText(tr("Default microphone or manual PipeWire node name"));
+        inputLayout->addWidget(inputDevice_, 1);
+        auto* refreshDevicesButton = new QPushButton(tr("Refresh"), inputRow);
+        inputLayout->addWidget(refreshDevicesButton);
+        form->addRow(tr("Microphone / input"), inputRow);
+        connect(refreshDevicesButton, &QPushButton::clicked, this, [this] { refreshInputDevices(); });
 
         outputName_ = new QLineEdit(QStringLiteral("vst-host-virtual-mic"), central);
         form->addRow(tr("Virtual microphone name"), outputName_);
@@ -492,6 +503,7 @@ public:
         pollTimer_->setInterval(200);
         connect(pollTimer_, &QTimer::timeout, this, [this] { pollEngine(); });
         loadSettings();
+        refreshInputDevices();
         pollTimer_->start();
     }
 
@@ -515,7 +527,7 @@ private:
         for (const auto& path : paths) chainList_->addItem(path);
         const auto directories = settings.value(QStringLiteral("pluginDirectories")).toStringList();
         for (const auto& directory : directories) pluginDirectories_->addItem(directory);
-        inputTarget_->setText(settings.value(QStringLiteral("inputTarget")).toString());
+        inputDevice_->setEditText(settings.value(QStringLiteral("inputTarget")).toString());
         outputName_->setText(settings.value(QStringLiteral("outputName"),
                                              QStringLiteral("vst-host-virtual-mic")).toString());
         gain_->setValue(settings.value(QStringLiteral("gain"), 1.0).toDouble());
@@ -539,7 +551,7 @@ private:
         for (int i = 0; i < pluginDirectories_->count(); ++i)
             directories.push_back(pluginDirectories_->item(i)->text());
         settings.setValue(QStringLiteral("pluginDirectories"), directories);
-        settings.setValue(QStringLiteral("inputTarget"), inputTarget_->text());
+        settings.setValue(QStringLiteral("inputTarget"), inputTargetValue());
         settings.setValue(QStringLiteral("outputName"), outputName_->text());
         settings.setValue(QStringLiteral("gain"), gain_->value());
         settings.setValue(QStringLiteral("latencyFrames"), latency_->currentText());
@@ -554,7 +566,7 @@ private:
             options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
         for (int i = 0; i < pluginDirectories_->count(); ++i)
             options.plugin_directories.push_back(pluginDirectories_->item(i)->text().toStdString());
-        options.input_target = inputTarget_->text().trimmed().toStdString();
+        options.input_target = inputTargetValue().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;
         options.gain = static_cast<float>(gain_->value());
@@ -571,7 +583,7 @@ private:
         for (const auto& directory : options.plugin_directories)
             pluginDirectories_->addItem(QString::fromStdString(directory));
         scanPluginDirectories();
-        inputTarget_->setText(QString::fromStdString(options.input_target));
+        inputDevice_->setEditText(QString::fromStdString(options.input_target));
         outputName_->setText(QString::fromStdString(options.output_name));
         gain_->setValue(options.gain);
         latency_->setCurrentText(QString::number(options.latency_frames));
@@ -637,6 +649,10 @@ private:
     }
 
     void startAudio() {
+        if (deviceScanPending_) {
+            status_->setText(tr("Wait for microphone discovery to finish before starting audio."));
+            return;
+        }
         if (worker_.joinable()) worker_.join();
         saveSettings();
         if (chainList_->count() == 0) {
@@ -655,7 +671,7 @@ private:
             options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
         for (int i = 0; i < pluginDirectories_->count(); ++i)
             options.plugin_directories.push_back(pluginDirectories_->item(i)->text().toStdString());
-        options.input_target = inputTarget_->text().trimmed().toStdString();
+        options.input_target = inputTargetValue().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;
         options.gain = static_cast<float>(gain_->value());
@@ -754,7 +770,43 @@ private:
         connect(dialog, &QDialog::finished, this, [this] { editorDialog_ = nullptr; });
     }
 
+    QString inputTargetValue() const {
+        if (inputDevice_->currentIndex() >= 0 && inputDevice_->currentData().isValid())
+            return inputDevice_->currentData().toString();
+        return inputDevice_->currentText().trimmed();
+    }
+
+    void refreshInputDevices() {
+        if (deviceScanPending_ || engine_) return;
+        deviceScanPending_ = true;
+        status_->setText(tr("Scanning PipeWire input devices…"));
+        deviceScanFuture_ = std::async(std::launch::async, [] {
+            std::string error;
+            auto devices = vst_host::audio::list_pipewire_input_devices(error);
+            return std::make_pair(std::move(devices), std::move(error));
+        });
+    }
+
     void pollEngine() {
+        if (deviceScanPending_ && deviceScanFuture_.valid() &&
+            deviceScanFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            auto result = deviceScanFuture_.get();
+            deviceScanPending_ = false;
+            const auto previousTarget = inputTargetValue();
+            inputDevice_->clear();
+            inputDevice_->addItem(tr("Default microphone"), QString());
+            for (const auto& device : result.first) {
+                const auto label = QString::fromStdString(device.description) +
+                    QStringLiteral(" [") + QString::number(device.id) + QStringLiteral("]");
+                inputDevice_->addItem(label, QString::fromStdString(device.name));
+            }
+            int selected = inputDevice_->findData(previousTarget);
+            if (selected >= 0) inputDevice_->setCurrentIndex(selected);
+            else inputDevice_->setEditText(previousTarget);
+            status_->setText(result.second.empty()
+                ? tr("Found %1 PipeWire input source(s).").arg(result.first.size())
+                : QString::fromStdString(result.second));
+        }
         if (!engine_) return;
         if (engineFinished_.load(std::memory_order_acquire)) {
             if (editorDialog_) {
@@ -789,7 +841,7 @@ private:
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};
     QPushButton* moveDownButton_{};
-    QLineEdit* inputTarget_{};
+    QComboBox* inputDevice_{};
     QLineEdit* outputName_{};
     QDoubleSpinBox* gain_{};
     QComboBox* latency_{};
@@ -801,6 +853,8 @@ private:
     QTimer* pollTimer_{};
     std::unique_ptr<vst_host::audio::PipeWireEngine> engine_;
     std::thread worker_;
+    std::future<std::pair<std::vector<vst_host::audio::PipeWireInputDevice>, std::string>> deviceScanFuture_;
+    bool deviceScanPending_{false};
     std::atomic<bool> engineFinished_{false};
     int engineResult_{0};
     QPointer<PluginEditorDialog> editorDialog_;

@@ -35,7 +35,8 @@
 ## Phase 4 — User interface
 - [x] Add an optional Qt 6 UI with VST3 editor hosting; headless build remains independent.
 - [x] Plugin chain editor, gain bypass, and engine status.
-- [ ] PipeWire device enumeration/selection, plugin bypass, and input/output meters.
+- [x] PipeWire device enumeration/selection in the Qt frontend.
+- [ ] Plugin bypass and input/output meters.
 - [ ] Ensure the app remains usable headlessly.
 
 ## Phase 5 — Later research

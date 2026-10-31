@@ -632,6 +632,11 @@ private:
             startButton_->setEnabled(true);
             stopButton_->setEnabled(false);
             editorButton_->setEnabled(false);
+            chainList_->setEnabled(true);
+            addPluginButton_->setEnabled(true);
+            removePluginButton_->setEnabled(true);
+            moveUpButton_->setEnabled(true);
+            moveDownButton_->setEnabled(true);
             status_->setText(engineResult_ == 0
                                  ? tr("Audio engine stopped.")
                                  : tr("Audio engine exited with an error. See the terminal output for details."));

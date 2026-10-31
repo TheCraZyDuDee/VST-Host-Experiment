@@ -304,7 +304,7 @@ void PipeWireEngine::request_stop() noexcept {
 }
 
 Vst3Processor* PipeWireEngine::plugin_processor() const noexcept {
-    return plugin_processor(0);
+    return impl_ ? impl_->published_plugin.load(std::memory_order_acquire) : nullptr;
 }
 
 Vst3Processor* PipeWireEngine::plugin_processor(std::size_t index) const noexcept {

@@ -39,7 +39,7 @@
 - [ ] Ensure the app remains usable headlessly.
 
 ## Phase 5 — Later research
-- [ ] Add configurable plugin-directory scanning and discovery.
+- [x] Add configurable plugin-directory scanning and discovery.
 - [ ] Assess Wine-based hosting for Windows plugins without requiring users to manage a bridge manually.
 - [ ] Prototype compatibility in an isolated helper process.
 - [ ] Document unsupported plugins and failure behavior.

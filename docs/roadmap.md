@@ -19,7 +19,7 @@
 - [x] Define a real-time-safe processor interface and route the gain stage through it.
 - [ ] Support runtime gain/bypass changes using bounded real-time-safe control transfer.
 - [x] Add ordered processor chains, mono/stereo adaptation between VST3 stages, and cumulative plugin-latency reporting.
-- [ ] Add persistence for device and graph settings.
+- [x] Persist plugin chain order and host audio routing/gain/latency settings in the Qt UI.\n- [ ] Add persisted plugin-internal state and device settings.
 
 ## Phase 3 — Native plugins
 - [x] Evaluate the Steinberg VST3 SDK license and optional dependency strategy.

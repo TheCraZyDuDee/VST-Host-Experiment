@@ -108,7 +108,7 @@ void on_source_process(void* userdata) {
         // valid microphone samples on every callback with mismatched quanta.
         // Old audio is still trimmed if capture gets far ahead of playback.
         state->ring.pop_interleaved(samples, frames,
-            std::max<std::size_t>(4096, state->latency_frames * 8));
+            std::max<std::size_t>(1024, state->latency_frames * 4));
         state->processor_chain.process(samples, frames);
         state->processor.process(samples, frames);
 

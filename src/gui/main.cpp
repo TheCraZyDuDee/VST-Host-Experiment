@@ -424,6 +424,31 @@ public:
             saveSettings();
         });
 
+        root->addWidget(new QLabel(tr("Windows VST3 directories (Wine / yabridge)"), central));
+        windowsPluginDirectories_ = new QListWidget(central);
+        windowsPluginDirectories_->setMaximumHeight(90);
+        root->addWidget(windowsPluginDirectories_);
+        auto* windowsDirectoryActions = new QHBoxLayout();
+        auto* addWindowsDirectoryButton = new QPushButton(tr("Add Windows plugin directory…"), central);
+        auto* removeWindowsDirectoryButton = new QPushButton(tr("Remove Windows directory"), central);
+        windowsDirectoryActions->addWidget(addWindowsDirectoryButton);
+        windowsDirectoryActions->addWidget(removeWindowsDirectoryButton);
+        root->addLayout(windowsDirectoryActions);
+        connect(addWindowsDirectoryButton, &QPushButton::clicked, this, [this] {
+            const auto path = QFileDialog::getExistingDirectory(this, tr("Add Windows VST3 directory"));
+            if (path.isEmpty()) return;
+            bool exists = false;
+            for (int i = 0; i < windowsPluginDirectories_->count(); ++i)
+                if (windowsPluginDirectories_->item(i)->text() == path) exists = true;
+            if (!exists) windowsPluginDirectories_->addItem(path);
+            saveSettings();
+        });
+        connect(removeWindowsDirectoryButton, &QPushButton::clicked, this, [this] {
+            const int row = windowsPluginDirectories_->currentRow();
+            if (row >= 0) delete windowsPluginDirectories_->takeItem(row);
+            saveSettings();
+        });
+
         auto* inputRow = new QWidget(central);
         auto* inputLayout = new QHBoxLayout(inputRow);
         inputLayout->setContentsMargins(0, 0, 0, 0);
@@ -527,6 +552,8 @@ private:
         for (const auto& path : paths) chainList_->addItem(path);
         const auto directories = settings.value(QStringLiteral("pluginDirectories")).toStringList();
         for (const auto& directory : directories) pluginDirectories_->addItem(directory);
+        const auto windowsDirectories = settings.value(QStringLiteral("windowsPluginDirectories")).toStringList();
+        for (const auto& directory : windowsDirectories) windowsPluginDirectories_->addItem(directory);
         inputDevice_->setEditText(settings.value(QStringLiteral("inputTarget")).toString());
         outputName_->setText(settings.value(QStringLiteral("outputName"),
                                              QStringLiteral("vst-host-virtual-mic")).toString());
@@ -551,6 +578,10 @@ private:
         for (int i = 0; i < pluginDirectories_->count(); ++i)
             directories.push_back(pluginDirectories_->item(i)->text());
         settings.setValue(QStringLiteral("pluginDirectories"), directories);
+        QStringList windowsDirectories;
+        for (int i = 0; i < windowsPluginDirectories_->count(); ++i)
+            windowsDirectories.push_back(windowsPluginDirectories_->item(i)->text());
+        settings.setValue(QStringLiteral("windowsPluginDirectories"), windowsDirectories);
         settings.setValue(QStringLiteral("inputTarget"), inputTargetValue());
         settings.setValue(QStringLiteral("outputName"), outputName_->text());
         settings.setValue(QStringLiteral("gain"), gain_->value());
@@ -566,6 +597,10 @@ private:
             options.plugin_paths.push_back(chainList_->item(i)->text().toStdString());
         for (int i = 0; i < pluginDirectories_->count(); ++i)
             options.plugin_directories.push_back(pluginDirectories_->item(i)->text().toStdString());
+        for (int i = 0; i < windowsPluginDirectories_->count(); ++i)
+            options.windows_plugin_directories.push_back(windowsPluginDirectories_->item(i)->text().toStdString());
+        for (int i = 0; i < windowsPluginDirectories_->count(); ++i)
+            options.windows_plugin_directories.push_back(windowsPluginDirectories_->item(i)->text().toStdString());
         options.input_target = inputTargetValue().toStdString();
         options.output_name = outputName_->text().trimmed().toStdString();
         options.output_description = options.output_name;
@@ -582,6 +617,9 @@ private:
         pluginDirectories_->clear();
         for (const auto& directory : options.plugin_directories)
             pluginDirectories_->addItem(QString::fromStdString(directory));
+        windowsPluginDirectories_->clear();
+        for (const auto& directory : options.windows_plugin_directories)
+            windowsPluginDirectories_->addItem(QString::fromStdString(directory));
         scanPluginDirectories();
         inputDevice_->setEditText(QString::fromStdString(options.input_target));
         outputName_->setText(QString::fromStdString(options.output_name));
@@ -655,9 +693,9 @@ private:
         }
         if (worker_.joinable()) worker_.join();
         saveSettings();
-        if (chainList_->count() == 0) {
+        if (chainList_->count() == 0 && windowsPluginDirectories_->count() == 0) {
             QMessageBox::warning(this, tr("Plugin chain is empty"),
-                                 tr("Add at least one native Linux VST3 effect to the chain."));
+                                 tr("Add a native Linux VST3 effect or a Windows VST3 search directory."));
             return;
         }
         if (outputName_->text().trimmed().isEmpty()) {
@@ -678,19 +716,6 @@ private:
         options.latency_frames = latency_->currentText().toUInt();
         options.bypass = bypass_->isChecked();
 
-        options.preloaded_plugins.reserve(options.plugin_paths.size());
-        for (std::size_t i = 0; i < options.plugin_paths.size(); ++i) {
-            auto plugin = std::make_shared<vst_host::audio::Vst3Processor>(options.plugin_paths[i]);
-            std::string pluginError;
-            if (!plugin->load(pluginError)) {
-                QMessageBox::critical(
-                    this, tr("Could not load plugin %1").arg(i + 1),
-                    QString::fromStdString(pluginError));
-                return;
-            }
-            options.preloaded_plugins.push_back(std::move(plugin));
-        }
-
         engine_ = std::make_unique<vst_host::audio::PipeWireEngine>(std::move(options));
         engineFinished_.store(false, std::memory_order_release);
         engineResult_ = 0;
@@ -707,7 +732,9 @@ private:
         moveUpButton_->setEnabled(false);
         moveDownButton_->setEnabled(false);
         editorButton_->setEnabled(false);
-        status_->setText(tr("Starting audio engine…"));
+        status_->setText(options.windows_plugin_directories.empty()
+            ? tr("Starting audio engine…")
+            : tr("Preparing Windows plugins through Wine/yabridge…"));
     }
 
     void stopAudio() {
@@ -829,6 +856,11 @@ private:
             return;
         }
         if (engine_->plugin_processor() != nullptr) {
+            while (static_cast<std::size_t>(chainList_->count()) < engine_->plugin_count()) {
+                const auto path = engine_->plugin_path(static_cast<std::size_t>(chainList_->count()));
+                if (path.empty()) break;
+                chainList_->addItem(QString::fromStdString(path));
+            }
             editorButton_->setEnabled(true);
             status_->setText(tr("Audio is running. Plugin editor is available."));
         }
@@ -837,6 +869,7 @@ private:
     QLineEdit* pluginPath_{};
     QListWidget* chainList_{};
     QListWidget* pluginDirectories_{};
+    QListWidget* windowsPluginDirectories_{};
     QPushButton* addPluginButton_{};
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};

@@ -139,6 +139,11 @@ if(BUILD_TESTING)
     target_compile_features(plugin-discovery-test PRIVATE cxx_std_20)
     add_test(NAME plugin-discovery-test COMMAND plugin-discovery-test)
 
+    add_executable(yabridge-manager-test tests/yabridge_manager_test.cpp)
+    target_include_directories(yabridge-manager-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(yabridge-manager-test PRIVATE cxx_std_20)
+    add_test(NAME yabridge-manager-test COMMAND yabridge-manager-test)
+
     add_executable(processor-chain-test tests/processor_chain_test.cpp)
     target_include_directories(processor-chain-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(processor-chain-test PRIVATE cxx_std_20)

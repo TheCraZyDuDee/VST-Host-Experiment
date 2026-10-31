@@ -1124,6 +1124,9 @@ private:
             auto* next = engine_->plugin_processor(static_cast<std::size_t>(selectedIndex));
             QString error;
             if (!editorDialog_->switchProcessor(next, selectedIndex, error)) {
+                // The dialog recovered the previous view; keep the main-chain
+                // highlight consistent with the editor it is actually showing.
+                chainList_->setCurrentRow(editorIndex_);
                 QMessageBox::warning(this, tr("Could not switch plugin editor"), error);
                 return;
             }

@@ -129,6 +129,11 @@ if(BUILD_TESTING)
     target_compile_features(audio-processor-test PRIVATE cxx_std_20)
     add_test(NAME audio-processor-test COMMAND audio-processor-test)
 
+    add_executable(config-test tests/config_test.cpp)
+    target_include_directories(config-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(config-test PRIVATE cxx_std_20)
+    add_test(NAME config-test COMMAND config-test)
+
     add_executable(processor-chain-test tests/processor_chain_test.cpp)
     target_include_directories(processor-chain-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(processor-chain-test PRIVATE cxx_std_20)

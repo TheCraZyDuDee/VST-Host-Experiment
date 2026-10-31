@@ -356,7 +356,7 @@ int PipeWireEngine::run() {
     if (preloaded_plugins.empty() && impl_->options.preloaded_plugin)
         preloaded_plugins.push_back(impl_->options.preloaded_plugin);
     if (preloaded_plugins.size() > plugin_paths.size()) {
-        std::fprintf(stderr, "More preloaded VST3 instances than plugin paths were supplied.\\n");
+        std::fprintf(stderr, "More preloaded VST3 instances than plugin paths were supplied.\n");
         return -EINVAL;
     }
     impl_->state.plugin_chain.reserve(plugin_paths.size());
@@ -365,7 +365,7 @@ int PipeWireEngine::run() {
         if (!plugin) plugin = std::make_shared<Vst3Processor>(plugin_paths[index]);
         std::string plugin_error;
         if (!plugin->load(plugin_error)) {
-            std::fprintf(stderr, "Could not load VST3 plugin %zu ('%s'): %s\\n",
+            std::fprintf(stderr, "Could not load VST3 plugin %zu ('%s'): %s\n",
                          index + 1, plugin_paths[index].c_str(), plugin_error.c_str());
             return -EINVAL;
         }
@@ -380,7 +380,7 @@ int PipeWireEngine::run() {
     for (std::size_t index = 0; index < impl_->state.plugin_chain.size(); ++index) {
         if (!impl_->state.plugin_chain[index]->prepare(process_spec)) {
             std::fprintf(stderr,
-                         "Could not prepare VST3 plugin %zu ('%s') for stereo 48 kHz audio.\\n",
+                         "Could not prepare VST3 plugin %zu ('%s') for stereo 48 kHz audio.\n",
                          index + 1, impl_->state.plugin_chain[index]->plugin_path().c_str());
             return -EINVAL;
         }
@@ -405,7 +405,7 @@ int PipeWireEngine::run() {
                     1000.0 * static_cast<double>(impl_->options.latency_frames) / sample_rate);
         for (std::size_t index = 0; index < impl_->state.plugin_chain.size(); ++index) {
             const auto& plugin = impl_->state.plugin_chain[index];
-            std::printf("VST3 chain %zu: %s (latency %u frames)\\n",
+            std::printf("VST3 chain %zu: %s (latency %u frames)\n",
                         index + 1, plugin->plugin_path().c_str(), plugin->latency_frames());
         }
         std::printf("Press Ctrl+C to stop.\n");

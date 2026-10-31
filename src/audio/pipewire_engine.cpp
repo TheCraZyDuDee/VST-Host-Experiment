@@ -4,6 +4,7 @@
 #include "processor_chain.hpp"
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
+#include "plugin_discovery.hpp"
 
 #include <pipewire/pipewire.h>
 

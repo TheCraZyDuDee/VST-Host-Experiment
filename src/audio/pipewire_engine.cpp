@@ -7,6 +7,7 @@
 #include <pipewire/pipewire.h>
 
 #include <algorithm>
+#include <atomic>
 #include <spa/param/audio/format-utils.h>
 
 #include <cerrno>
@@ -32,7 +33,7 @@ struct EngineState {
     pw_stream* source_stream{};
     StereoRingBuffer ring;
     GainProcessor processor;
-    std::unique_ptr<Vst3Processor> plugin_processor;
+    std::shared_ptr<Vst3Processor> plugin_processor;
     std::size_t latency_frames{128};
     int setup_error{0};
 };
@@ -156,6 +157,8 @@ struct PipeWireEngine::Impl {
     spa_hook capture_listener{};
     spa_hook source_listener{};
     bool initialized{false};
+    std::atomic<pw_main_loop*> published_loop{nullptr};
+    std::atomic<Vst3Processor*> published_plugin{nullptr};
 
     int create_source_stream() {
         const auto latency = std::to_string(options.latency_frames) + "/48000";
@@ -270,6 +273,8 @@ PipeWireEngine::~PipeWireEngine() {
     if (impl_ == nullptr) {
         return;
     }
+    impl_->published_plugin.store(nullptr, std::memory_order_release);
+    impl_->published_loop.store(nullptr, std::memory_order_release);
     if (impl_->state.capture_stream != nullptr) {
         pw_stream_destroy(impl_->state.capture_stream);
     }
@@ -291,6 +296,17 @@ PipeWireEngine::~PipeWireEngine() {
     delete impl_;
 }
 
+void PipeWireEngine::request_stop() noexcept {
+    if (impl_ == nullptr) return;
+    if (auto* loop = impl_->published_loop.load(std::memory_order_acquire)) {
+        pw_main_loop_quit(loop);
+    }
+}
+
+Vst3Processor* PipeWireEngine::plugin_processor() const noexcept {
+    return impl_ ? impl_->published_plugin.load(std::memory_order_acquire) : nullptr;
+}
+
 int PipeWireEngine::run() {
     int argc = 0;
     char* arguments[] = {nullptr};
@@ -299,6 +315,9 @@ int PipeWireEngine::run() {
     impl_->initialized = true;
 
     impl_->state.loop = pw_main_loop_new(nullptr);
+    if (impl_->state.loop != nullptr) {
+        impl_->published_loop.store(impl_->state.loop, std::memory_order_release);
+    }
     if (impl_->state.loop == nullptr) {
         std::fprintf(stderr, "Could not create PipeWire main loop.\n");
         return -ENOMEM;
@@ -322,7 +341,10 @@ int PipeWireEngine::run() {
                        request_shutdown, &impl_->state);
 
     if (!impl_->options.plugin_path.empty()) {
-        auto plugin = std::make_unique<Vst3Processor>(impl_->options.plugin_path);
+        auto plugin = impl_->options.preloaded_plugin;
+        if (!plugin) {
+            plugin = std::make_shared<Vst3Processor>(impl_->options.plugin_path);
+        }
         std::string plugin_error;
         if (!plugin->load(plugin_error)) {
             std::fprintf(stderr, "Could not load VST3 plugin: %s\n", plugin_error.c_str());
@@ -345,6 +367,9 @@ int PipeWireEngine::run() {
     auto result = impl_->create_source_stream();
     if (result == 0) {
         result = impl_->create_capture_stream();
+    }
+    if (result == 0 && impl_->state.plugin_processor) {
+        impl_->published_plugin.store(impl_->state.plugin_processor.get(), std::memory_order_release);
     }
     if (result == 0) {
         std::printf("Virtual microphone: %s\n", impl_->options.output_name.c_str());

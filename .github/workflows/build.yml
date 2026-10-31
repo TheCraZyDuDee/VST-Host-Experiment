@@ -21,3 +21,16 @@ jobs:
         run: cmake --build build --parallel 2
       - name: Test
         run: ctest --test-dir build --output-on-failure
+
+  gui-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GUI and audio build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-dev
+      - name: Configure GUI and VST3 support
+        run: cmake -S . -B build-gui -DCMAKE_BUILD_TYPE=Release -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
+      - name: Build GUI and VST3 host
+        run: cmake --build build-gui --parallel 2

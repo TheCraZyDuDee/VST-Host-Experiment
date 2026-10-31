@@ -13,6 +13,7 @@ int main() {
     source.latency_frames = 512;
     source.bypass = true;
     source.plugin_paths = {"/plugins/First Effect.vst3", "/plugins/Second.vst3"};
+    source.plugin_directories = {"/plugins/effects", "/home/user/custom-vst3"};
 
     std::string error;
     assert(vst_host::audio::save_config(path, source, error));
@@ -24,6 +25,7 @@ int main() {
     assert(restored.latency_frames == source.latency_frames);
     assert(restored.bypass == source.bypass);
     assert(restored.plugin_paths == source.plugin_paths);
+    assert(restored.plugin_directories == source.plugin_directories);
 
     std::filesystem::remove(path);
     return 0;

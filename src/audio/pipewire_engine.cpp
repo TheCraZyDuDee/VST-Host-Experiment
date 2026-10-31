@@ -438,7 +438,7 @@ int PipeWireEngine::run() {
                                                         : impl_->options.input_target.c_str());
         std::printf("Gain: %.3f%s\n", impl_->options.gain,
                     impl_->options.bypass ? " (bypassed)" : "");
-        std::printf("Requested latency: %zu frames (%.2f ms at 48 kHz)\n",
+        std::printf("Requested latency: %u frames (%.2f ms at 48 kHz)\n",
                     impl_->options.latency_frames,
                     1000.0 * static_cast<double>(impl_->options.latency_frames) / sample_rate);
         for (std::size_t index = 0; index < impl_->state.plugin_chain.size(); ++index) {

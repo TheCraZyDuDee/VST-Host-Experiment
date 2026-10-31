@@ -356,6 +356,13 @@ int PipeWireEngine::run() {
         plugin_paths.push_back(impl_->options.plugin_path);
     if (preloaded_plugins.empty() && impl_->options.preloaded_plugin)
         preloaded_plugins.push_back(impl_->options.preloaded_plugin);
+    std::string scan_warning;
+    const auto discovered_plugins = discover_vst3_plugins(impl_->options.plugin_directories, &scan_warning);
+    if (!scan_warning.empty()) std::fprintf(stderr, "%s", scan_warning.c_str());
+    for (const auto& path : discovered_plugins) {
+        if (std::find(plugin_paths.begin(), plugin_paths.end(), path) == plugin_paths.end())
+            plugin_paths.push_back(path);
+    }
     if (preloaded_plugins.size() > plugin_paths.size()) {
         std::fprintf(stderr, "More preloaded VST3 instances than plugin paths were supplied.\n");
         return -EINVAL;

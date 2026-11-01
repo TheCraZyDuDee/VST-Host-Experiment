@@ -52,6 +52,6 @@ On orderly shutdown, the host disconnects PipeWire streams before requesting VST
 
 ## Build boundaries
 
-`vst-host` is the headless executable. `vst-host-gui` adds Qt Widgets with native Wayland or X11 windows. Embedded plug-in-specific XEmbed editors require optional X11 headers at build time and the Qt `xcb` platform at runtime. Under native Wayland, standard plugin parameter controls remain usable; third-party editor embedding is not Wayland-native. VST3 uses the pinned Steinberg SDK or a supplied checkout; VST2 is **disabled by default** and requires a user-provided, appropriately licensed legacy SDK. Neither Wine nor a bridge is bundled.
+`vst-host` is the headless executable. `vst-host-gui` adds Qt Widgets with native Wayland or X11 windows. Embedded plug-in-specific XEmbed editors require optional X11 headers at build time. On Qt `xcb`, they appear inside the host dialog. Under native Qt Wayland with a working XWayland `DISPLAY`, legacy XEmbed editors can appear in separate X11 companion windows; standard host parameter controls remain native Wayland. True native VST3 Wayland editor embedding requires the Steinberg 3.8 `IWaylandHost`/`IWaylandFrame` protocol and is not yet implemented. VST3 uses the pinned Steinberg SDK or a supplied checkout; VST2 is **disabled by default** and requires a user-provided, appropriately licensed legacy SDK. Neither Wine nor a bridge is bundled.
 
 For setup and user workflows see [Getting started](getting-started.md); for format and configuration details see [Plugins](plugins.md).

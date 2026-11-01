@@ -35,7 +35,7 @@ jobs:
       - name: Install GUI and audio build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-dev qt6-wayland weston
+          sudo apt-get install -y build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-dev qt6-wayland weston libx11-dev xvfb
       - name: Configure GUI and VST3 support
         run: cmake -S . -B build-gui -DCMAKE_BUILD_TYPE=Release -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
       - name: Build GUI and VST3 host
@@ -77,3 +77,32 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/vst-host-wayland.log"
           test "$exit_code" -eq 124
+      - name: Smoke-test XEmbed companion window from native Qt Wayland
+        shell: bash
+        run: |
+          set -euo pipefail
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/vst-host-xembed-wayland"
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          weston --backend=headless-backend.so --socket=vst-host-xembed-ci \
+            --idle-time=0 --log="$RUNNER_TEMP/weston-xembed.log" &
+          weston_pid=$!
+          Xvfb :83 -screen 0 1280x800x24 -nolisten tcp \
+            > "$RUNNER_TEMP/xvfb-xembed.log" 2>&1 &
+          xvfb_pid=$!
+          trap 'kill "$xvfb_pid" "$weston_pid" 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do
+            if [[ -S "$XDG_RUNTIME_DIR/vst-host-xembed-ci" && -S /tmp/.X11-unix/X83 ]]; then
+              break
+            fi
+            sleep 0.2
+          done
+          if [[ ! -S "$XDG_RUNTIME_DIR/vst-host-xembed-ci" || ! -S /tmp/.X11-unix/X83 ]]; then
+            cat "$RUNNER_TEMP/weston-xembed.log" "$RUNNER_TEMP/xvfb-xembed.log"
+            exit 1
+          fi
+          # This verifies Xlib parent/window creation with a Wayland Qt app.
+          # Third-party Wine/VST editor rendering still needs real desktop tests.
+          QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=vst-host-xembed-ci DISPLAY=:83 \
+            ./build-gui/vst-host-gui --check-xembed-window
+

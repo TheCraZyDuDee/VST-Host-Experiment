@@ -4,14 +4,16 @@
 
 - Linux with PipeWire in a logged-in user session (WirePlumber is recommended for pinned-mic reconnection).
 - C++20 compiler, `pkg-config`, PipeWire 0.3 development headers, CMake **3.20+** for the SDK-free CLI or **3.25+** for VST3.
-- For the GUI: Qt 6 Widgets and X11 development files. On a Wayland desktop, XWayland and `QT_QPA_PLATFORM=xcb` are needed for embedded plugin editors.
+- For the GUI: Qt 6 Widgets and a Qt platform plugin (such as `qt6-wayland` for native Wayland). X11 development files are optional; they enable embedded XEmbed plugin editors when running with `xcb`.
 - VST3 support: Steinberg SDK (fetched automatically at first configure, or supplied via `VST3_SDK_ROOT`).
 - VST2 support: a **user-provided, legally licensed legacy VST2.4 SDK** with `pluginterfaces/vst2.x/aeffectx.h`. VST2 remains off by default.
 
 On Debian/Ubuntu, install typical dependencies:
 
 ```sh
-sudo apt install build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-dev libx11-dev
+sudo apt install build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-dev qt6-wayland
+# Optional, for embedding legacy plug-in GUIs via X11/XWayland:
+sudo apt install libx11-dev
 ```
 
 Check `cmake --version`: the distribution's CMake may be too old for VST3.
@@ -23,6 +25,9 @@ Check `cmake --version`: the distribution's CMake may be too old for VST3.
 ```sh
 cmake -S . -B build -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
 cmake --build build --parallel 2
+QT_QPA_PLATFORM=wayland ./build/vst-host-gui
+
+# Optional: when a plug-in needs its own XEmbed interface, use X11/XWayland:
 QT_QPA_PLATFORM=xcb ./build/vst-host-gui
 ```
 
@@ -58,7 +63,7 @@ ctest --test-dir build --output-on-failure
 2. Set **Virtual microphone name**, output gain and latency buffer (128/256/512/1024 frames). Try 256 or 512 frames if you hear dropouts.
 3. Click **Add Linux directory…** for native VST2/VST3, or **Add Windows directory…** for Windows plugins. Click **Scan all**. Selecting a directory scans recursively; see [Windows plugins](windows-vst3-bridge.md) for how global bridge registrations are filtered.
 4. Select plugins from **Available plugins** and click **Add selected to chain**. Drag to reorder or remove them while audio is stopped. You can also add a VST3 bundle directly, or a VST2 `.so` when built with VST2 support.
-5. Click **Start audio**. Choose the published virtual microphone in the consuming app. Double-click an effect or click **Edit selected effect**. The editor also has **Parameters (host controls)** for plugins that do not expose a usable GUI.
+5. Click **Start audio**. Choose the published virtual microphone in the consuming app. Double-click an effect or click **Edit selected effect**. On Wayland, the dialog opens native Qt **Parameters (host controls)** without requiring X11. If you need a plug-in's custom XEmbed interface, relaunch with `QT_QPA_PLATFORM=xcb` under XWayland.
 6. Toggle **Bypass selected effect** without stopping audio. To change devices, add/remove/reorder plugins, or change startup gain/latency, stop audio first.
 7. Click **Stop audio** to save each plugin instance's state. Use **Save configuration…** to export it as a portable `.vsthost` file. **Load configuration…** restores a saved setup.
 

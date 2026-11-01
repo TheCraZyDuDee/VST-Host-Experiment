@@ -16,10 +16,11 @@ This page tracks remaining engineering work, not a historical development diary.
 2. **Reliability:** better Wine bridge/plugin crash diagnostics, recovery paths, and device/session-manager edge cases.
 3. **Performance validation:** measure end-to-end latency, buffer behavior, CPU use, and plugin-induced latency on representative hardware.
 4. **Controls:** consider live output-gain adjustment and further parameter automation without disrupting the audio thread.
-5. **Compatibility:** expand testing across Linux distributions, plugins, and desktop environments; improve editor focus/resizing.
+5. **Compatibility:** expand testing across Linux distributions, plugins, and desktop environments; improve editor focus/resizing. Validate floating XWayland vendor editors under native Qt Wayland on real desktops.
+6. **Genuine native VST3 Wayland editors:** implement the Steinberg VST3 3.8 `IWaylandHost` / `IWaylandFrame` protocol and host-side compositor integration for plug-ins supporting `kPlatformTypeWaylandSurfaceID` (tracked in [issue #30](https://github.com/TheCraZyDuDee/VST-Host-Experiment/issues/30)). Keep XEmbed/XWayland fallback for older plug-ins.
 
 ## Out of scope for now
 
-MIDI instruments, dedicated multichannel/sidechain routing, and fully native Wayland plugin embedding are not supported. VST2 licensing restrictions remain in force; the SDK is not distributed with this project.
+MIDI instruments and dedicated multichannel/sidechain routing are not supported. Fully native Wayland plugin editor embedding is not implemented yet (see the compatibility priority above). VST2 licensing restrictions remain in force; the SDK is not distributed with this project.
 
 See [Architecture](architecture.md) for implementation boundaries and [Troubleshooting](troubleshooting.md) for current limitations.

@@ -1406,8 +1406,9 @@ private:
             editorIndex_ = selectedIndex;
             editorDialog_->setWindowTitle(tr("Effect %1: %2")
                 .arg(selectedIndex + 1)
-                .arg(QFileInfo(chainList_->item(selectedIndex)
-                    ->data(Qt::UserRole).toString()).completeBaseName()));
+                .arg(displayPluginName(
+                    chainList_->item(selectedIndex)->data(Qt::UserRole).toString(),
+                    chainList_->item(selectedIndex)->data(Qt::UserRole + 1).toBool())));
             editorDialog_->raise();
             editorDialog_->activateWindow();
             return;
@@ -1436,10 +1437,10 @@ private:
         QStringList effectNames;
         for (int i = 0; i < chainList_->count(); ++i) {
             auto* item = chainList_->item(i);
-            effectNames << tr("%1. %2%3")
+            effectNames << tr("%1. %2")
                 .arg(i + 1)
-                .arg(QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName())
-                .arg(item->data(Qt::UserRole + 1).toBool() ? tr(" (WINE)") : QString());
+                .arg(displayPluginName(item->data(Qt::UserRole).toString(),
+                                       item->data(Qt::UserRole + 1).toBool()));
         }
         auto* dialog = new PluginEditorDialog(processor, effectNames, selectedIndex,
             [this](int index) {
@@ -1449,7 +1450,8 @@ private:
             }, this);
         if (auto* item = chainList_->item(selectedIndex))
             dialog->setWindowTitle(tr("Effect %1: %2").arg(selectedIndex + 1).arg(
-                QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName()));
+                displayPluginName(item->data(Qt::UserRole).toString(),
+                                  item->data(Qt::UserRole + 1).toBool())));
         QString error;
         if (!dialog->attachEditor(error)) {
             dialog->close();

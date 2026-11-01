@@ -4,7 +4,7 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 
 ## Current status
 
-**Prototype 0.7 development:** the command-line host supports ordered native Linux VST3 chains, portable configuration files, recursive plugin-directory scanning, and optional Windows VST3 discovery through Wine/yabridge. The optional Qt 6 frontend provides chain editing, PipeWire input selection, audio buffer diagnostics, and portable configuration import/export. The CLI can load the same configuration headlessly without Qt. Real-device audio validation and bridge crash isolation remain open.
+**Prototype 0.7 development:** the command-line host supports ordered native Linux VST3 chains, portable configuration files, recursive plugin-directory scanning, and optional Windows VST3 discovery through Wine/vstbridge (with yabridge fallback). The optional Qt 6 frontend provides chain editing, PipeWire input selection, audio buffer diagnostics, and portable configuration import/export. The CLI can load the same configuration headlessly without Qt. Real-device audio validation and bridge crash isolation remain open.
 
 ## Goals
 
@@ -12,7 +12,7 @@ A lightweight Linux-first real-time audio host for chaining audio plugins and ex
 - Support native Linux VST3 plugins first; evaluate VST2 support separately after checking SDK and distribution constraints.
 - Let users choose an input device, arrange a plugin chain, and select an output/virtual microphone.
 - Keep the audio engine independent from the user interface so a headless mode remains possible.
-- Support Windows-only VST3 plugins as an optional Wine/yabridge compatibility path; native Linux plugins remain the simplest and lightest option.
+- Support Windows-only VST3 plugins using an optional Wine/vstbridge compatibility path (or yabridge fallback); native Linux plugins remain the simplest and lightest option.
 
 ## Technical direction
 
@@ -61,7 +61,7 @@ cmake --build build-vst3-gui
 ./build-vst3-gui/vst-host-gui
 ```
 
-The GUI separates the available-plugin browser from the active processing chain. Add an individual `.vst3` bundle to the browser, or configure Linux and Windows VST3 search directories in one directory list and scan them to populate one available-plugin browser. Windows plugins appear with a `(WINE)` suffix; discovery prepares yabridge's Linux-side wrappers on a background worker and requires Wine/yabridge already installed. Select individual available plugins to add them to the processing chain explicitly, without automatically loading all scanned bundles on startup. The active chain can then be reordered or removed independently. The chain entries can be dragged to reorder them (or use the Move up/Move down controls), and the selected plugin's editor can be opened. It also provides Load configuration and Save configuration for portable `.vsthost` files. The chain and audio routing/gain/latency settings are additionally saved between launches using the desktop settings store. It enumerates available PipeWire capture sources at startup and offers a Refresh control plus editable manual node-name entry (leave empty for the default microphone). The selected source is saved by its PipeWire node name, while the displayed label includes its current node id. Configure gain and requested latency, then start/stop the virtual microphone. With audio running, the active processing-chain list stays selectable; double-click an effect or select it and click **Edit selected effect** to open its editor. The editor itself also has an **Edit effect** dropdown to switch directly between running instances without destroying the Qt editor window. You can switch between active instances without stopping the microphone, while adding, removing, and reordering effects remain disabled until audio stops. Editor parameter changes are transferred to the audio processor using a bounded non-blocking queue; preset changes that notify the host are also forwarded. Use **Edit selected effect** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. Native and Wine/yabridge editor input and focus depend on X11/XWayland and the plugin's own windowing implementation; test mouse, keyboard, and parameter response with representative plugins. **If a Wine plugin displays correctly but its controls do not move**, open the **Parameters (host controls)** tab in the editor. It exposes up to 512 standard VST3 parameters as sliders (including stepped parameters); changes are passed to the running DSP on the audio callback through the non-blocking parameter queue. Plug-in-specific graphical controls that are not exported as VST3 parameters cannot be represented here. For the native embedded editor itself, be aware of upstream Wine/yabridge window-position and mouse-input issues ([yabridge #409](https://github.com/robbert-vdh/yabridge/issues/409), [#506](https://github.com/robbert-vdh/yabridge/issues/506) and [Wine bug 59822](https://bugs.winehq.org/show_bug.cgi?id=59822)). Test the same plugin under an established yabridge-compatible host to distinguish plugin/Wine bugs from issues in this host. Wine's virtual desktop option may restore mouse clicks for affected setups but can misplace plug-in popups. The yabridge documentation also recommends DXVK for certain plug-ins whose GUI fails to repaint when interacted with. Runtime behavior is not verified by headless CI. The command-line `vst-host` target is still built alongside the GUI.
+The GUI separates the available-plugin browser from the active processing chain. Add an individual `.vst3` bundle to the browser, or configure Linux and Windows VST3 search directories in one directory list and scan them to populate one available-plugin browser. Windows plugins appear with a `(WINE)` suffix; discovery prepares the chosen bridge's Linux-side wrappers on a background worker and requires Wine and vstbridge (preferred) or yabridge already installed. Select individual available plugins to add them to the processing chain explicitly, without automatically loading all scanned bundles on startup. The active chain can then be reordered or removed independently. The chain entries can be dragged to reorder them (or use the Move up/Move down controls), and the selected plugin's editor can be opened. It also provides Load configuration and Save configuration for portable `.vsthost` files. The chain and audio routing/gain/latency settings are additionally saved between launches using the desktop settings store. It enumerates available PipeWire capture sources at startup and offers a Refresh control plus editable manual node-name entry (leave empty for the default microphone). The selected source is saved by its PipeWire node name, while the displayed label includes its current node id. Configure gain and requested latency, then start/stop the virtual microphone. With audio running, the active processing-chain list stays selectable; double-click an effect or select it and click **Edit selected effect** to open its editor. The editor itself also has an **Edit effect** dropdown to switch directly between running instances without destroying the Qt editor window. You can switch between active instances without stopping the microphone, while adding, removing, and reordering effects remain disabled until audio stops. Editor parameter changes are transferred to the audio processor using a bounded non-blocking queue; preset changes that notify the host are also forwarded. Use **Edit selected effect** to embed the plugin's own editor. Native editor embedding currently requires the Qt `xcb` platform; on a Wayland desktop with XWayland installed, try `QT_QPA_PLATFORM=xcb ./build-vst3-gui/vst-host-gui`. Plug-ins that do not expose an X11-compatible editor will report an error. Native and Wine bridge editor input and focus depend on X11/XWayland and the plugin's own windowing implementation; test mouse, keyboard, and parameter response with representative plugins. **If a Wine plugin displays correctly but its controls do not move**, open the **Parameters (host controls)** tab in the editor. It exposes up to 512 standard VST3 parameters as sliders (including stepped parameters); changes are passed to the running DSP on the audio callback through the non-blocking parameter queue. Plug-in-specific graphical controls that are not exported as VST3 parameters cannot be represented here. For the native embedded editor itself, be aware of upstream Wine/yabridge window-position and mouse-input issues ([yabridge #409](https://github.com/robbert-vdh/yabridge/issues/409), [#506](https://github.com/robbert-vdh/yabridge/issues/506) and [Wine bug 59822](https://bugs.winehq.org/show_bug.cgi?id=59822)). Test the same plugin under an established yabridge-compatible host to distinguish plugin/Wine bugs from issues in this host. Wine's virtual desktop option may restore mouse clicks for affected setups but can misplace plug-in popups. The yabridge documentation also recommends DXVK for certain plug-ins whose GUI fails to repaint when interacted with. Runtime behavior is not verified by headless CI. The command-line `vst-host` target is still built alongside the GUI.
 
 
 The first configure downloads the SDK and its required source submodules; later builds reuse them in the CMake build directory. VSTGUI and the SDK's example plugins are disabled because this headless host does not need them. To use an SDK checkout you already have instead, pass `-DVST3_SDK_ROOT=/path/to/vst3sdk` with `-DVST_HOST_ENABLE_VST3=ON`. VST3 hosting stays optional, so the normal build does not need a network connection or the SDK. The SDK is distributed under the terms in the [official SDK repository](https://github.com/steinbergmedia/vst3sdk).
@@ -72,7 +72,7 @@ The application must run inside a logged-in desktop/user session with PipeWire a
 ./build/vst-host --input NODE_ID_OR_NAME --name vst-host-mic --gain 1.0
 ```
 
-Use `--config my-setup.vsthost` to load a configuration saved by the GUI and run it headlessly (no Qt process or desktop window is started). CLI options supplied after `--config` override scalar settings; repeated `--plugin` entries append to the configured chain. Use `--save-config my-setup.vsthost` to write the effective CLI settings before starting. Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, repeat `--plugin` to load individual native Linux VST3 audio effects, use `--plugin-dir PATH` to scan a directory recursively for Linux `.vst3` bundles, or use `--windows-plugin-dir PATH` to register a Windows VST3 directory with Wine/yabridge. Windows directories are synchronized automatically before the audio stream starts, and generated Linux-side wrappers are loaded into the same chain. Multiple plugin directories can be supplied; discovered plugins are appended in sorted path order after individually specified plugins. For example:
+Use `--config my-setup.vsthost` to load a configuration saved by the GUI and run it headlessly (no Qt process or desktop window is started). CLI options supplied after `--config` override scalar settings; repeated `--plugin` entries append to the configured chain. Use `--save-config my-setup.vsthost` to write the effective CLI settings before starting. Use `--gain 0.5` to attenuate, `--gain 2.0` to amplify, or `--bypass` to bypass the gain stage. With a VST3-enabled build, repeat `--plugin` to load individual native Linux VST3 audio effects, use `--plugin-dir PATH` to scan a directory recursively for Linux `.vst3` bundles, or use `--windows-plugin-dir PATH` to register a Windows VST3 directory with Wine and the selected bridge. Windows directories are synchronized using vstbridge when installed (or yabridge as a fallback) before the audio stream starts, and the generated Linux-side wrappers are loaded into the same chain. Multiple plugin directories can be supplied; discovered plugins are appended in sorted path order after individually specified plugins. For example:
 
 ```sh
 ./build-vst3/vst-host --input NODE_ID_OR_NAME --plugin /path/to/Effect.vst3 --name vst-host-mic
@@ -82,9 +82,45 @@ Each plugin instance currently supports its first main audio input/output bus wi
 
 The output source is intended to appear in applications' microphone/input-device lists as **VST Host Virtual Microphone** (or the name supplied with `--name`). This needs verification on the target distribution and PipeWire version; if the node is exposed as an application stream instead of a selectable source, the virtual-source publication strategy will need adjustment.
 
+## Windows VST3 bridging (vstbridge preferred)
+
+Install Wine and [vstbridge](https://github.com/rations/vstbridge) separately.
+For modern Wine, use a compatible [vstbridge release](https://github.com/rations/vstbridge/releases)
+(for example v0.0.4, released October 28, 2026). It includes a fix for embedded
+Windows VST3 editors that draw correctly but do not respond to mouse clicks.
+This is a candidate fix for RNNoise and Supertone Clear under Wine 11.20,
+not a guarantee until those plugins are tested on a real desktop.
+
+The host searches for `~/.local/share/vstbridge/vstbridgectl` and
+`vstbridgectl` on `PATH`; it **prefers vstbridge** whenever both bridges are
+installed. If vstbridge is absent, the existing yabridge integration still
+works. You can select a particular executable explicitly:
+
+```sh
+VSTBRIDGECTL="$HOME/.local/share/vstbridge/vstbridgectl" ./build-vst3-gui/vst-host-gui
+# To deliberately keep using legacy yabridge:
+YABRIDGECTL="$HOME/.local/share/yabridge/yabridgectl" ./build-vst3-gui/vst-host-gui
+```
+
+The GUI keeps the same **Add Windows directory** and **Scan all** controls.
+The selected bridge registers each directory, runs `sync`, and scans the
+resulting native wrappers. vstbridge writes VST3 wrappers to
+`~/.vst3/vstbridge/`; yabridge uses `~/.vst3/yabridge/`. You do not need to
+rename or manually symlink either directory. When vstbridge's equivalent
+wrapper exists, the GUI automatically updates saved processing-chain entries
+that still point to yabridge, preserving their order and repeated instances.
+If a wrapper has not been synchronized, the old path is retained instead of
+silently replacing it with a nonexistent one. Rescan or re-add that plugin
+from the available browser.
+
+Existing `.vsthost` files and Windows search-directory settings remain
+compatible, and the Host Controls fallback is still available. The bridge
+is not downloaded or installed automatically. For details, see
+[Windows VST3 bridge architecture and migration](docs/windows-vst3-bridge.md).
+
 ## Known limitations
 
-- Windows VST3 support is optional and requires Wine plus yabridge/yabridgectl to be installed separately. The host registers configured Windows plugin directories and runs `yabridgectl sync`; it does not install Wine or yabridge. yabridge's own configuration is shared with other hosts, so removing a directory from this app does not unregister it from yabridge.
+- Windows VST3 support is optional and requires Wine plus a separately installed bridge: [vstbridge](https://github.com/rations/vstbridge) (preferred) or yabridge (fallback). The host runs the selected tool's `add`, `sync`, and `status` commands; it does not install either bridge. Each bridge's plugin-directory configuration is shared with other hosts, so removing a directory from this app does not unregister it from the bridge.
 - PipeWire device enumeration and selection are implemented in the GUI, but hotplug updates require pressing Refresh. The CLI still accepts `--input` as a PipeWire target id/name.
 - Stereo F32 input is requested at 48 kHz. Compatibility with mono-only devices and other negotiated formats still needs testing.
 - Plug-in-internal state persistence and audio meters are not implemented. Generic host parameter controls are available while a VST3 editor is attached, but do not substitute for plug-in-specific controls. Portable host configuration files store plugin paths and host audio settings, but not plugin-internal state. Embedded editor hosting currently supports X11/XWayland only; Wayland-native editor embedding is future work.

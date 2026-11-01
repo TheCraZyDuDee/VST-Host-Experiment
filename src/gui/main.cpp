@@ -23,6 +23,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QAbstractItemView>
+#include <QAbstractItemModel>
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPushButton>
@@ -593,7 +594,18 @@ public:
         availablePlugins_ = new QListWidget(central);
         availablePlugins_->setMinimumHeight(130);
         availablePlugins_->setSelectionMode(QAbstractItemView::SingleSelection);
-        root->addWidget(new QLabel(tr("Available plugins (from individual bundles and search directories)"), central));
+        auto* browserHeader = new QHBoxLayout();
+        browserHeader->addWidget(new QLabel(tr("Available plugins"), central));
+        browserHeader->addStretch(1);
+        availableCount_ = new QLabel(tr("0 available"), central);
+        browserHeader->addWidget(availableCount_);
+        root->addLayout(browserHeader);
+        pluginSearch_ = new QLineEdit(central);
+        pluginSearch_->setClearButtonEnabled(true);
+        pluginSearch_->setPlaceholderText(tr("Search plugins by name or path…"));
+        root->addWidget(pluginSearch_);
+        connect(pluginSearch_, &QLineEdit::textChanged, this,
+                [this](const QString&) { applyPluginFilter(); });
         root->addWidget(availablePlugins_, 1);
         auto* availableActions = new QHBoxLayout();
         addSelectedPluginButton_ = new QPushButton(tr("Add selected to chain →"), central);
@@ -714,7 +726,7 @@ public:
         actions->addWidget(editorButton_);
         root->addLayout(actions);
 
-        status_ = new QLabel(tr("Ready. Choose a plugin to begin."), central);
+        status_ = new QLabel(tr("Ready. Add effects to the chain or start without effects for direct microphone routing."), central);
         status_->setWordWrap(true);
         root->addWidget(status_);
         diagnostics_ = new QLabel(tr("Audio diagnostics: not running"), central);
@@ -734,15 +746,22 @@ public:
             const auto path = QFileDialog::getExistingDirectory(
                 this, tr("Add individual VST3 plugin bundle"), pluginPath_->text());
             if (!path.isEmpty()) {
+                if (!path.endsWith(QStringLiteral(".vst3"), Qt::CaseInsensitive)) {
+                    QMessageBox::warning(this, tr("Not a VST3 bundle"),
+                        tr("Select a folder ending in .vst3, not its parent directory."));
+                    return;
+                }
                 pluginPath_->setText(path);
                 if (!manualPlugins_.contains(path)) manualPlugins_.append(path);
                 addAvailablePlugin(path, false);
+                applyPluginFilter();
                 saveSettings();
             }
         });
         connect(removePluginButton_, &QPushButton::clicked, this, [this] {
             const int row = chainList_->currentRow();
             if (row >= 0) delete chainList_->takeItem(row);
+            updateChainLabels();
             saveSettings();
         });
         connect(moveUpButton_, &QPushButton::clicked, this, [this] {
@@ -760,6 +779,11 @@ public:
                 [this](int) { updateSelectedPlugin(); });
         connect(chainList_, &QListWidget::itemDoubleClicked, this,
                 [this](QListWidgetItem*) { if (editorButton_->isEnabled()) openEditor(); });
+        connect(chainList_->model(), &QAbstractItemModel::rowsMoved, this,
+                [this] {
+                    updateChainLabels();
+                    saveSettings();
+                });
 
         pollTimer_ = new QTimer(this);
         pollTimer_->setInterval(200);
@@ -781,6 +805,40 @@ protected:
     }
 
 private:
+    static QString displayPluginName(const QString& path, bool wine) {
+        const QFileInfo info(path);
+        QString name = info.completeBaseName();
+        if (name.isEmpty()) name = info.fileName();
+        if (name.isEmpty()) name = path;
+        if (wine) name += tr(" (WINE)");
+        return name;
+    }
+
+    void applyPluginFilter() {
+        if (!pluginSearch_ || !availableCount_ || !availablePlugins_) return;
+        const auto query = pluginSearch_->text().trimmed();
+        int visible = 0;
+        for (int i = 0; i < availablePlugins_->count(); ++i) {
+            auto* item = availablePlugins_->item(i);
+            const bool matches = query.isEmpty() ||
+                item->text().contains(query, Qt::CaseInsensitive) ||
+                item->data(Qt::UserRole).toString().contains(query, Qt::CaseInsensitive);
+            item->setHidden(!matches);
+            if (matches) ++visible;
+        }
+        availableCount_->setText(tr("%1 of %2 available")
+            .arg(visible).arg(availablePlugins_->count()));
+    }
+
+    void updateChainLabels() {
+        for (int i = 0; i < chainList_->count(); ++i) {
+            auto* item = chainList_->item(i);
+            item->setText(tr("%1. %2").arg(i + 1)
+                .arg(displayPluginName(item->data(Qt::UserRole).toString(),
+                                        item->data(Qt::UserRole + 1).toBool())));
+        }
+    }
+
     static bool appearsToBeWineWrapper(const QString& path) {
         return path.contains(QStringLiteral("/yabridge/")) ||
                path.contains(QStringLiteral("/vstbridge/"));
@@ -800,11 +858,11 @@ private:
     }
 
     void addChainPlugin(const QString& path, bool wine) {
-        auto* item = new QListWidgetItem(
-            path + (wine ? tr(" (WINE)") : QString()), chainList_);
+        auto* item = new QListWidgetItem(displayPluginName(path, wine), chainList_);
         item->setData(Qt::UserRole, path);
         item->setData(Qt::UserRole + 1, wine);
         item->setToolTip(path);
+        updateChainLabels();
     }
 
     void setEditingEnabled(bool enabled) {
@@ -933,8 +991,7 @@ private:
             auto* existing = availablePlugins_->item(i);
             if (existing->data(Qt::UserRole).toString() == path) return;
         }
-        auto* item = new QListWidgetItem(
-            path + (wine ? tr(" (WINE)") : QString()), availablePlugins_);
+        auto* item = new QListWidgetItem(displayPluginName(path, wine), availablePlugins_);
         item->setData(Qt::UserRole, path);
         item->setData(Qt::UserRole + 1, wine);
         item->setToolTip(path);
@@ -944,7 +1001,7 @@ private:
     void addAvailablePluginToChain() {
         if (engine_ || pluginScanPending_) return;
         auto* selected = availablePlugins_->currentItem();
-        if (!selected) return;
+        if (!selected || selected->isHidden()) return;
         // Repeated instances of the same VST are valid and can use different settings.
         addChainPlugin(selected->data(Qt::UserRole).toString(),
                        selected->data(Qt::UserRole + 1).toBool());
@@ -1051,6 +1108,7 @@ private:
         auto* item = chainList_->takeItem(row);
         chainList_->insertItem(target, item);
         chainList_->setCurrentRow(target);
+        updateChainLabels();
     }
 
     void startAudio() {
@@ -1261,17 +1319,21 @@ private:
                     if (oldPath == newPath) continue;
                     const auto path = QString::fromStdString(newPath);
                     item->setData(Qt::UserRole, path);
-                    item->setText(path + tr(" (WINE)"));
+                    item->setText(displayPluginName(path, true));
                     item->setToolTip(path);
                     ++migratedEntries;
                 }
-                if (migratedEntries > 0) saveSettings();
+                if (migratedEntries > 0) {
+                    updateChainLabels();
+                    saveSettings();
+                }
             }
             const auto selected = availablePlugins_->currentItem()
                 ? availablePlugins_->currentItem()->data(Qt::UserRole).toString() : QString();
             availablePlugins_->clear();
             for (const auto& entry : result.plugins)
                 addAvailablePlugin(QString::fromStdString(entry.first), entry.second);
+            applyPluginFilter();
             for (int i = 0; i < availablePlugins_->count(); ++i) {
                 if (availablePlugins_->item(i)->data(Qt::UserRole).toString() == selected) {
                     availablePlugins_->setCurrentRow(i);
@@ -1343,6 +1405,8 @@ private:
 
     QLineEdit* pluginPath_{};
     QListWidget* availablePlugins_{};
+    QLineEdit* pluginSearch_{};
+    QLabel* availableCount_{};
     QListWidget* chainList_{};
     QListWidget* pluginDirectories_{};
     QStringList manualPlugins_;

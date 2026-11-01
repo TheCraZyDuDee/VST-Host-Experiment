@@ -1,6 +1,7 @@
 #include "pipewire_engine.hpp"
 
 #include "stereo_ring_buffer.hpp"
+#include "capture_target_policy.hpp"
 #include "processor_chain.hpp"
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
@@ -8,6 +9,7 @@
 #include "windows_bridge_manager.hpp"
 
 #include <pipewire/pipewire.h>
+#include <spa/utils/dict.h>
 
 #include <algorithm>
 #include <atomic>
@@ -35,6 +37,11 @@ struct EngineState {
     pw_core* core{};
     pw_stream* capture_stream{};
     pw_stream* source_stream{};
+    pw_registry* input_registry{};
+    std::string selected_target_name;
+    std::unordered_set<std::uint32_t> matching_target_nodes;
+    std::atomic<bool> selected_target_present{false};
+    std::atomic<bool> capture_streaming{false};
     StereoRingBuffer ring;
     GainProcessor processor;
     std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
@@ -69,7 +76,11 @@ void on_capture_process(void* userdata) {
         const auto frames = sample_count / channel_count;
         const auto* samples = reinterpret_cast<const float*>(
             static_cast<const std::uint8_t*>(data.data) + data.chunk->offset);
-        state->ring.push_interleaved(samples, frames);
+        // The session manager should not relink a pinned stream, but guard
+        // against processing a different input during device disappearance.
+        if (state->selected_target_name.empty() ||
+            state->selected_target_present.load(std::memory_order_acquire))
+            state->ring.push_interleaved(samples, frames);
     }
 
     pw_stream_queue_buffer(state->capture_stream, buffer);
@@ -77,8 +88,10 @@ void on_capture_process(void* userdata) {
 
 void on_capture_state_changed(void* userdata, pw_stream_state, pw_stream_state state,
                               const char* error) {
+    auto* data = static_cast<EngineState*>(userdata);
+    data->capture_streaming.store(state == PW_STREAM_STATE_STREAMING,
+                                  std::memory_order_release);
     if (state == PW_STREAM_STATE_ERROR) {
-        auto* data = static_cast<EngineState*>(userdata);
         data->setup_error_message = std::string("PipeWire capture stream error: ") +
             (error != nullptr ? error : "unknown error");
         std::fprintf(stderr, "%s\n", data->setup_error_message.c_str());
@@ -110,10 +123,21 @@ void on_source_process(void* userdata) {
         // Allow a small scheduling cushion: a tight two-period cap can discard
         // valid microphone samples on every callback with mismatched quanta.
         // Old audio is still trimmed if capture gets far ahead of playback.
-        state->ring.pop_interleaved(samples, frames,
-            std::max<std::size_t>(1024, state->latency_frames * 4));
-        state->processor_chain.process(samples, frames);
-        state->processor.process(samples, frames);
+        // Keep the virtual microphone available, but never relay another mic
+        // or plugin-generated output while the explicitly pinned input is
+        // absent. Don't replay buffered audio after it reconnects.
+        const bool pinned_input_unavailable =
+            !state->selected_target_name.empty() &&
+            (!state->selected_target_present.load(std::memory_order_acquire) ||
+             !state->capture_streaming.load(std::memory_order_acquire));
+        if (pinned_input_unavailable) {
+            mute_disconnected_capture(state->ring, samples, frames);
+        } else {
+            state->ring.pop_interleaved(samples, frames,
+                std::max<std::size_t>(1024, state->latency_frames * 4));
+            state->processor_chain.process(samples, frames);
+            state->processor.process(samples, frames);
+        }
 
         data.chunk->offset = 0;
         data.chunk->stride = static_cast<int32_t>(frame_bytes);

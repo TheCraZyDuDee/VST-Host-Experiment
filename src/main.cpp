@@ -104,12 +104,16 @@ int main(int argc, char** argv) {
                     return 2;
                 }
                 options.windows_plugin_directories.emplace_back(value);
+                // CLI directory flags explicitly opt in to loading discovered
+                // effects. Saved .vsthost directory entries remain scan-only.
+                options.auto_load_windows_plugin_directories.emplace_back(value);
             } else if (arg == "--plugin-dir") {
                 if (value.empty()) {
                     std::cerr << "Plugin directory cannot be empty.\n";
                     return 2;
                 }
                 options.plugin_directories.emplace_back(value);
+                options.auto_load_plugin_directories.emplace_back(value);
             } else if (arg == "--plugin" || arg == "--plugin-bypassed") {
                 if (value.empty()) {
                     std::cerr << "Plugin path cannot be empty.\n";

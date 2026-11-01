@@ -1,5 +1,6 @@
 #include "vst2_processor.hpp"
 #include "parameter_event_queue.hpp"
+#include "vst2_audio_layout.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -28,9 +29,7 @@ struct Vst2Processor::Impl {
     bool prepared{};
     bool editor_open{};
     bool active{};
-    std::vector<float> input_left, input_right, output_left, output_right;
-    float* input_channels[2]{};
-    float* output_channels[2]{};
+    Vst2StereoBuffers audio_buffers;
     ParameterEventQueue pending;
     std::uint32_t max_block{1024};
 
@@ -108,9 +107,16 @@ bool Vst2Processor::load(std::string& error) {
         return false;
     }
     impl_->dispatch(effOpen);
-    if (impl_->effect->numInputs < 1 || impl_->effect->numInputs > 2 ||
-        impl_->effect->numOutputs < 1 || impl_->effect->numOutputs > 2) {
-        error = "VST2 effect must have mono/stereo audio inputs and outputs: " + impl_->path;
+    // Some stereo effects (including ReaComp/ReaGate) declare extra input
+    // channels for their optional sidechain. We silence those inputs rather
+    // than rejecting the plugin; output is still routed to stereo.
+    if (!supported_vst2_audio_layout(impl_->effect->numInputs,
+                                     impl_->effect->numOutputs)) {
+        error = "Unsupported VST2 audio layout (" +
+                std::to_string(impl_->effect->numInputs) + " input, " +
+                std::to_string(impl_->effect->numOutputs) +
+                " output channels; supported: 1-" +
+                std::to_string(max_vst2_channels) + " each): " + impl_->path;
         return false;
     }
     return true;
@@ -124,16 +130,10 @@ bool Vst2Processor::prepare(const AudioProcessSpec& spec) {
 #else
     if (!impl_->effect || spec.sample_rate == 0 || spec.channels != 2 ||
         spec.max_block_size == 0 || impl_->active) return false;
-    const auto frames = static_cast<std::size_t>(spec.max_block_size);
     impl_->max_block = spec.max_block_size;
-    impl_->input_left.assign(frames, 0.0F);
-    impl_->input_right.assign(frames, 0.0F);
-    impl_->output_left.assign(frames, 0.0F);
-    impl_->output_right.assign(frames, 0.0F);
-    impl_->input_channels[0] = impl_->input_left.data();
-    impl_->input_channels[1] = impl_->input_right.data();
-    impl_->output_channels[0] = impl_->output_left.data();
-    impl_->output_channels[1] = impl_->output_right.data();
+    if (!impl_->audio_buffers.prepare(
+            impl_->effect->numInputs, impl_->effect->numOutputs,
+            static_cast<std::size_t>(spec.max_block_size))) return false;
     impl_->dispatch(effSetSampleRate, 0, 0, nullptr, static_cast<float>(spec.sample_rate));
     impl_->dispatch(effSetBlockSize, 0, static_cast<VstIntPtr>(spec.max_block_size));
     impl_->dispatch(effMainsChanged, 0, 1);
@@ -152,15 +152,7 @@ void Vst2Processor::process(float* samples, std::size_t frames) noexcept {
     while (offset < frames) {
         const auto count = std::min(frames - offset,
                                      static_cast<std::size_t>(impl_->max_block));
-        for (std::size_t i = 0; i < count; ++i) {
-            const float left = samples[2 * (offset + i)];
-            const float right = samples[2 * (offset + i) + 1];
-            impl_->input_left[i] = impl_->effect->numInputs == 1
-                ? 0.5F * (left + right) : left;
-            impl_->input_right[i] = right;
-            impl_->output_left[i] = impl_->input_left[i];
-            impl_->output_right[i] = impl_->input_right[i];
-        }
+        impl_->audio_buffers.set_input(samples, offset, count);
         ParameterEventQueue::Event change{};
         for (int applied = 0; applied < 64 && impl_->pending.pop(change); ++applied) {
             if (change.id < static_cast<std::uint32_t>(impl_->effect->numParams))
@@ -169,13 +161,10 @@ void Vst2Processor::process(float* samples, std::size_t frames) noexcept {
                                             static_cast<float>(change.normalized_value));
         }
         impl_->effect->processReplacing(impl_->effect,
-                                       impl_->input_channels, impl_->output_channels,
+                                       impl_->audio_buffers.inputs(),
+                                       impl_->audio_buffers.outputs(),
                                        static_cast<VstInt32>(count));
-        for (std::size_t i = 0; i < count; ++i) {
-            samples[2 * (offset + i)] = impl_->output_left[i];
-            samples[2 * (offset + i) + 1] = impl_->effect->numOutputs == 1
-                ? impl_->output_left[i] : impl_->output_right[i];
-        }
+        impl_->audio_buffers.copy_output(samples, offset, count);
         offset += count;
     }
 #else

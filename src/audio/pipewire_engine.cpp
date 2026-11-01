@@ -5,6 +5,8 @@
 #include "processor_chain.hpp"
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
+#include "vst2_processor.hpp"
+#include "plugin_processor.hpp"
 #include "plugin_discovery.hpp"
 #include "windows_bridge_manager.hpp"
 
@@ -44,7 +46,7 @@ struct EngineState {
     std::atomic<bool> capture_streaming{false};
     StereoRingBuffer ring;
     GainProcessor processor;
-    std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
+    std::vector<std::shared_ptr<PluginProcessor>> plugin_chain;
     std::vector<std::string> plugin_paths;
     ProcessorChain processor_chain;
     std::size_t latency_frames{128};
@@ -249,7 +251,7 @@ struct PipeWireEngine::Impl {
     bool initialized{false};
     std::atomic<pw_main_loop*> published_loop{nullptr};
     std::atomic<bool> published_running{false};
-    std::atomic<Vst3Processor*> published_plugin{nullptr};
+    std::atomic<PluginProcessor*> published_plugin{nullptr};
 
     int create_source_stream() {
         const auto latency = std::to_string(options.latency_frames) + "/48000";
@@ -408,11 +410,11 @@ bool PipeWireEngine::selected_input_available() const noexcept {
            impl_->state.capture_streaming.load(std::memory_order_acquire);
 }
 
-Vst3Processor* PipeWireEngine::plugin_processor() const noexcept {
+PluginProcessor* PipeWireEngine::plugin_processor() const noexcept {
     return impl_ ? impl_->published_plugin.load(std::memory_order_acquire) : nullptr;
 }
 
-Vst3Processor* PipeWireEngine::plugin_processor(std::size_t index) const noexcept {
+PluginProcessor* PipeWireEngine::plugin_processor(std::size_t index) const noexcept {
     // The engine builds these vectors on its worker thread. The first-plugin
     // pointer publishes their finalized contents with release semantics.
     if (!impl_ || !impl_->published_plugin.load(std::memory_order_acquire) ||
@@ -519,30 +521,47 @@ int PipeWireEngine::run() {
     // equivalent new wrapper actually exists. Never alter unrelated plugins.
     if (!impl_->options.windows_plugin_directories.empty()) {
         for (auto& path : plugin_paths)
-            path = detail::migrate_vst3_wrapper_path(path, selected_bridge);
+            path = plugin_format(path) == PluginFormat::Vst2
+                ? detail::migrate_vst2_wrapper_path(path, selected_bridge)
+                : detail::migrate_vst3_wrapper_path(path, selected_bridge);
     }
     auto preloaded_plugins = impl_->options.preloaded_plugins;
     if (plugin_paths.empty() && !impl_->options.plugin_path.empty())
         plugin_paths.push_back(
             impl_->options.windows_plugin_directories.empty()
                 ? impl_->options.plugin_path
-                : detail::migrate_vst3_wrapper_path(
-                    impl_->options.plugin_path, selected_bridge));
+                : (plugin_format(impl_->options.plugin_path) == PluginFormat::Vst2
+                    ? detail::migrate_vst2_wrapper_path(
+                        impl_->options.plugin_path, selected_bridge)
+                    : detail::migrate_vst3_wrapper_path(
+                        impl_->options.plugin_path, selected_bridge)));
     if (preloaded_plugins.empty() && impl_->options.preloaded_plugin)
         preloaded_plugins.push_back(impl_->options.preloaded_plugin);
     std::string scan_warning;
-    const auto discovered_plugins = deduplicate_discovered_vst3_plugins(
-        discover_vst3_plugins(impl_->options.plugin_directories, &scan_warning));
+    auto discovered_plugins = discover_vst3_plugins(
+        impl_->options.plugin_directories, &scan_warning);
+#if defined(VST_HOST_ENABLE_VST2)
+    auto vst2_plugins = discover_vst2_plugins(
+        impl_->options.plugin_directories, &scan_warning);
+    discovered_plugins.insert(discovered_plugins.end(),
+                              vst2_plugins.begin(), vst2_plugins.end());
+#endif
+    // Separate aliases are collapsed only for auto-discovery; explicitly
+    // selected instances remain in the original processing order.
+    auto discovered_entries = std::vector<std::pair<std::string, bool>>{};
+    for (const auto& path : discovered_plugins)
+        discovered_entries.emplace_back(path, false);
+    discovered_entries = deduplicate_vst3_browser_entries(discovered_entries);
     if (!scan_warning.empty()) std::fprintf(stderr, "%s", scan_warning.c_str());
     // Keep intentional repeated explicit plugin instances, but never append
     // discovered bridge aliases whose original Windows module is already
     // represented in the CLI chain. This also covers overlapping scan roots.
     std::unordered_set<std::string> known_modules;
     for (const auto& path : plugin_paths)
-        known_modules.insert(vst3_plugin_source_identity(path));
-    for (const auto& path : discovered_plugins) {
-        if (known_modules.insert(vst3_plugin_source_identity(path)).second)
-            plugin_paths.push_back(path);
+        known_modules.insert(plugin_source_identity(path));
+    for (const auto& entry : discovered_entries) {
+        if (known_modules.insert(plugin_source_identity(entry.first)).second)
+            plugin_paths.push_back(entry.first);
     }
     if (preloaded_plugins.size() > plugin_paths.size()) {
         return impl_->fail(
@@ -550,18 +569,28 @@ int PipeWireEngine::run() {
     }
     impl_->state.plugin_chain.reserve(plugin_paths.size());
     for (std::size_t index = 0; index < plugin_paths.size(); ++index) {
-        auto plugin = index < preloaded_plugins.size() ? preloaded_plugins[index] : nullptr;
-        if (!plugin) plugin = std::make_shared<Vst3Processor>(plugin_paths[index]);
+        std::shared_ptr<PluginProcessor> plugin;
+        if (index < preloaded_plugins.size() && preloaded_plugins[index])
+            plugin = preloaded_plugins[index];
+        if (!plugin) {
+            if (plugin_format(plugin_paths[index]) == PluginFormat::Vst2)
+                plugin = std::make_shared<Vst2Processor>(plugin_paths[index]);
+            else if (plugin_format(plugin_paths[index]) == PluginFormat::Vst3)
+                plugin = std::make_shared<Vst3Processor>(plugin_paths[index]);
+            else
+                return impl_->fail("Unsupported plugin format: " + plugin_paths[index],
+                                   -EINVAL);
+        }
         std::string plugin_error;
         if (!plugin->load(plugin_error)) {
-            return impl_->fail("Could not load VST3 plugin " +
+            return impl_->fail("Could not load plugin " +
                 std::to_string(index + 1) + " ('" + plugin_paths[index] +
                 "'): " + plugin_error, -EINVAL);
         }
         if (index < impl_->options.plugin_states.size() &&
             !impl_->options.plugin_states[index].empty() &&
             !plugin->restore_plugin_state(impl_->options.plugin_states[index], plugin_error)) {
-            return impl_->fail("Could not restore saved state of VST3 plugin " +
+            return impl_->fail("Could not restore saved state of plugin " +
                 std::to_string(index + 1) + " ('" + plugin_paths[index] +
                 "'): " + plugin_error +
                 ". Clear the saved state for this effect if its version has changed.",
@@ -581,7 +610,7 @@ int PipeWireEngine::run() {
     }
     if (!impl_->state.processor_chain.prepare(process_spec)) {
         return impl_->fail(
-            "Could not prepare the VST3 processing chain. Check plugin format and audio I/O support.",
+            "Could not prepare plugin chain. Check plugin format and audio I/O support.",
             -EINVAL);
     }
 
@@ -604,7 +633,7 @@ int PipeWireEngine::run() {
                     1000.0 * static_cast<double>(impl_->options.latency_frames) / sample_rate);
         for (std::size_t index = 0; index < impl_->state.plugin_chain.size(); ++index) {
             const auto& plugin = impl_->state.plugin_chain[index];
-            std::printf("VST3 chain %zu: %s (latency %u frames)\n",
+            std::printf("Plugin chain %zu: %s (latency %u frames)\n",
                         index + 1, plugin->plugin_path().c_str(), plugin->latency_frames());
         }
         std::printf("Press Ctrl+C to stop.\n");

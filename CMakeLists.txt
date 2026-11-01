@@ -190,6 +190,11 @@ if(BUILD_TESTING)
 
     # Check the Linux GCC/Clang legacy aeffect.h calling-convention syntax
     # even when the non-redistributable VST2 SDK is not available in CI.
+    add_executable(windows-plugin-scope-test tests/windows_plugin_scope_test.cpp)
+    target_include_directories(windows-plugin-scope-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(windows-plugin-scope-test PRIVATE cxx_std_20)
+    add_test(NAME windows-plugin-scope-test COMMAND windows-plugin-scope-test)
+
     add_executable(vst2-audio-layout-test tests/vst2_audio_layout_test.cpp)
     target_include_directories(vst2-audio-layout-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(vst2-audio-layout-test PRIVATE cxx_std_20)
@@ -221,7 +226,7 @@ if(BUILD_TESTING)
         foreach(test_target IN ITEMS
                 ring-buffer-test capture-target-policy-test plugin-state-test parameter-event-queue-test audio-processor-test config-test
                 plugin-discovery-test windows-bridge-manager-test processor-chain-test
-                vst2-audio-layout-test vst2-legacy-abi-compat-test vst2-processor-test vst3-processor-test)
+                windows-plugin-scope-test vst2-audio-layout-test vst2-legacy-abi-compat-test vst2-processor-test vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)
         endforeach()
     endif()

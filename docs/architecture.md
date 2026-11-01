@@ -16,7 +16,7 @@ Output gain or gain bypass
 Named PipeWire virtual microphone (Audio/Source/Virtual)
 ```
 
-The engine processes **stereo 32-bit float audio at 48 kHz**. Capture and virtual-source callbacks exchange audio through a fixed-capacity, nonblocking ring buffer. An underrun outputs silence; overflow drops incoming frames; stale frames can be skipped after a long delay. The GUI reports cumulative underrun, dropped and stale frame counts.
+The engine processes **stereo 32-bit float audio at 48 kHz**. Capture and virtual-source callbacks exchange audio through a fixed-capacity, nonblocking ring buffer. An underrun outputs silence; overflow drops incoming frames; stale frames can be skipped after a long delay. The GUI reports cumulative underrun, dropped and stale frame counts. Dedicated stereo level meters observe valid capture data before effects and output samples after the effect chain and gain (including generated silence on pinned-input disconnects). Peak release and RMS smoothing are block-size aware; cross-thread readings are independent atomic values, read on the existing Qt timer. No allocations or locks are introduced in realtime callbacks.
 
 The host allocates plugin scratch buffers during preparation, not during each callback. It does not lock, scan files, load plugins, or update Qt widgets in the real-time callbacks. **Third-party plugins may have their own real-time safety limitations.**
 
@@ -32,6 +32,7 @@ When the named source disappears or capture is inactive, the output stream stays
 | --- | --- |
 | `src/audio/pipewire_engine.*` | Streams, lifecycle, input pinning, chain setup, diagnostics |
 | `src/audio/stereo_ring_buffer.hpp` | Bounded lock-free capture/output transfer |
+| `src/audio/stereo_level_meter.hpp` | Stereo peak/RMS levels and per-channel clipping event counts (atomic GUI snapshots) |
 | `src/audio/processor_chain.hpp` | Ordered effects and atomic per-effect bypass |
 | `src/audio/audio_processor.hpp` / `plugin_processor.hpp` | Common real-time DSP and plugin/editor contracts |
 | `src/audio/vst3_processor.*` | VST3 loading, bus adaptation, editor, parameter/state handling |

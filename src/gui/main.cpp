@@ -1106,6 +1106,7 @@ public:
         status_->setWordWrap(true);
         root->addWidget(status_);
         diagnostics_ = new QLabel(tr("Audio diagnostics: not running"), central);
+        diagnostics_->setWordWrap(true);
         root->addWidget(diagnostics_);
         auto* note = new QLabel(
             tr("Plugin-specific editors use X11/XWayland. On native Wayland, "
@@ -2009,16 +2010,28 @@ private:
             ? stats.dropped_frames - previousDiagnostics_.dropped_frames : 0;
         const auto newStale = stats.stale_frames >= previousDiagnostics_.stale_frames
             ? stats.stale_frames - previousDiagnostics_.stale_frames : 0;
+        const auto newSanitizedInput =
+            stats.sanitized_input_samples >= previousDiagnostics_.sanitized_input_samples
+            ? stats.sanitized_input_samples - previousDiagnostics_.sanitized_input_samples : 0;
+        const auto newSanitizedOutput =
+            stats.sanitized_output_samples >= previousDiagnostics_.sanitized_output_samples
+            ? stats.sanitized_output_samples - previousDiagnostics_.sanitized_output_samples : 0;
         previousDiagnostics_ = stats;
         diagnostics_->setText(
             tr("Audio frames (total / last poll): missing %1 / +%2; "
-               "overflow %3 / +%4; stale trimmed %5 / +%6")
+               "overflow %3 / +%4; stale trimmed %5 / +%6\n"
+               "Nonfinite samples zeroed: input %7 / +%8; "
+               "post-effect output %9 / +%10")
                 .arg(static_cast<qulonglong>(stats.underrun_frames))
                 .arg(static_cast<qulonglong>(newUnderrun))
                 .arg(static_cast<qulonglong>(stats.dropped_frames))
                 .arg(static_cast<qulonglong>(newOverflow))
                 .arg(static_cast<qulonglong>(stats.stale_frames))
-                .arg(static_cast<qulonglong>(newStale)));
+                .arg(static_cast<qulonglong>(newStale))
+                .arg(static_cast<qulonglong>(stats.sanitized_input_samples))
+                .arg(static_cast<qulonglong>(newSanitizedInput))
+                .arg(static_cast<qulonglong>(stats.sanitized_output_samples))
+                .arg(static_cast<qulonglong>(newSanitizedOutput)));
         if (engine_->plugin_processor() != nullptr) updateSelectedPlugin();
         if (engine_->is_running() && !engineReadyShown_) {
             // Apply any bypass changes made during asynchronous startup

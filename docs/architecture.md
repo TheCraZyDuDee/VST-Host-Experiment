@@ -40,7 +40,7 @@ When the named source disappears or capture is inactive, the output stream stays
 | `src/audio/windows_bridge_manager.hpp` | External Wine bridge registration/sync |
 | `src/audio/windows_plugin_scope.hpp` | Restrict global bridge discoveries to selected Windows roots |
 | `src/audio/config.hpp` / `plugin_state.hpp` | Portable settings and bounded binary state encoding |
-| `src/gui/main.cpp` | Qt plugin browser, chain controls, device UI, native X11 editor surface |
+| `src/gui/main.cpp` | Qt plugin browser, chain controls, device UI, native Qt Wayland/X11 host controls, optional X11 editor surface |
 
 The GUI scans devices and plugin directories off the UI thread. It retains an explicitly selected processing chain. The headless CLI restores that same chain from `--config`, without auto-loading other effects from saved library directories; `--plugin-dir` and `--windows-plugin-dir` explicitly opt in to additional automatic effects. Wine bridge synchronization for explicit Windows CLI directory scans runs before audio starts, outside audio callbacks.
 
@@ -52,6 +52,6 @@ On orderly shutdown, the host disconnects PipeWire streams before requesting VST
 
 ## Build boundaries
 
-`vst-host` is the headless executable. `vst-host-gui` adds Qt Widgets and the native X11/XEmbed editor surface. VST3 uses the pinned Steinberg SDK or a supplied checkout; VST2 is **disabled by default** and requires a user-provided, appropriately licensed legacy SDK. Neither Wine nor a bridge is bundled.
+`vst-host` is the headless executable. `vst-host-gui` adds Qt Widgets with native Wayland or X11 windows. Embedded plug-in-specific XEmbed editors require optional X11 headers at build time and the Qt `xcb` platform at runtime. Under native Wayland, standard plugin parameter controls remain usable; third-party editor embedding is not Wayland-native. VST3 uses the pinned Steinberg SDK or a supplied checkout; VST2 is **disabled by default** and requires a user-provided, appropriately licensed legacy SDK. Neither Wine nor a bridge is bundled.
 
 For setup and user workflows see [Getting started](getting-started.md); for format and configuration details see [Plugins](plugins.md).

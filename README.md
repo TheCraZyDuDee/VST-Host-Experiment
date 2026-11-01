@@ -6,12 +6,14 @@ Supports native Linux plugins and Windows plugins through [vstbridge](https://gi
 
 ## Quick start
 
-Requires a Linux desktop session with PipeWire, a C++20 compiler, CMake **3.25+** for VST3, Qt 6 Widgets, X11 development libraries, and `pkg-config` / PipeWire development headers.
+Requires a Linux desktop session with PipeWire, a C++20 compiler, CMake **3.25+** for VST3, Qt 6 Widgets, and `pkg-config` / PipeWire development headers. On Wayland install the Qt Wayland platform plugin; X11 development libraries are optional for legacy XEmbed editor windows.
 
 On Debian/Ubuntu, install the development packages (use a recent enough CMake):
 
 ```sh
-sudo apt install build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-dev libx11-dev
+sudo apt install build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-dev qt6-wayland
+# Optional: build X11/XWayland plug-in editor embedding
+sudo apt install libx11-dev
 ```
 
 Build the GUI with VST3 hosting enabled:
@@ -19,10 +21,13 @@ Build the GUI with VST3 hosting enabled:
 ```sh
 cmake -S . -B build -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
 cmake --build build --parallel 2
+QT_QPA_PLATFORM=wayland ./build/vst-host-gui
+
+# Optional: use X11/XWayland for embedded plug-in vendor editors
 QT_QPA_PLATFORM=xcb ./build/vst-host-gui
 ```
 
-The first build fetches the pinned Steinberg VST3 SDK unless `-DVST3_SDK_ROOT=/path/to/vst3sdk` is provided. The GUI uses X11/XWayland for embedded plugin editors.
+The first build fetches the pinned Steinberg VST3 SDK unless `-DVST3_SDK_ROOT=/path/to/vst3sdk` is provided. The Qt GUI runs natively under Wayland, including standard plugin parameter controls; third-party XEmbed editor interfaces still require X11/XWayland.
 
 **VST2 is optional.** It requires a **locally provided, appropriately licensed legacy VST2.4 SDK**; the repository does not ship or fetch it. Add `-DVST_HOST_ENABLE_VST2=ON -DVST2_SDK_ROOT=/path/to/vst2sdk` to the CMake configuration to enable VST2 effects.
 
@@ -31,8 +36,8 @@ See [Getting started](docs/getting-started.md) for full build options and the CL
 ## Using the GUI
 
 1. Choose a **Microphone / input** (or leave **Default microphone** selected) and set the virtual microphone name.
-2. Use **Add Linux directory…** or **Add Windows directory…**, then **Scan all**. Alternatively, add an individual plugin bundle.
-3. Select effects in **Available plugins** and add them to the **Processing chain**. Drag to reorder; each entry identifies its format, e.g. `(VST2)` or `(VST3) (WINE)`.
+2. In the **Plugin library**, expand **Plugin folders and scanning** and use **Add Linux directory…** or **Add Windows directory…**, then **Scan all**. Collapse it again to make more room for effects. Alternatively, add an individual plugin bundle.
+3. Use the resizable, side-by-side **Plugin library** and **Processing chain** panels. Search with **Ctrl+F**, then double-click an available effect (or use **Add selected to chain**). Drag to reorder while stopped; each entry identifies its format, e.g. `(VST2)` or `(VST3) (WINE)`.
 4. Click **Start audio** and select the virtual microphone in Discord, OBS, or another app. Double-click an effect to edit it. **Bypass selected effect** works while audio runs.
 5. Click **Stop audio** to capture plugin settings. Use **Save configuration…** to export a portable `.vsthost` file.
 
@@ -45,7 +50,7 @@ Plugin settings, chain order, and host settings are retained between normal laun
 - Ordered native/Wine VST2 and VST3 effect chains, plugin browser/search, per-effect live bypass, built-in parameter controls, and state persistence.
 - PipeWire virtual microphone, stable input selection, hot-plug recovery, adjustable gain/latency, and audio buffer diagnostics.
 - Headless `vst-host` executable with `--config`, direct plugin paths, and recursive directory discovery.
-- **Current limits:** effects only (not VST2 instruments/MIDI), stereo microphone routing, no live add/remove/reorder during processing, and plugin editor embedding requires X11/XWayland. Third-party plugin behavior varies.
+- **Current limits:** effects only (not VST2 instruments/MIDI), stereo microphone routing, no live add/remove/reorder during processing, and vendor-specific XEmbed editor windows require X11/XWayland. The main Qt GUI and standard host parameters work on native Wayland. Third-party plugin behavior varies.
 
 ## Documentation
 

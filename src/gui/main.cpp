@@ -19,6 +19,11 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QGroupBox>
+#include <QSplitter>
+#include <QShortcut>
+#include <QKeySequence>
+#include <QToolButton>
 #include <QGuiApplication>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -645,11 +650,31 @@ class MainWindow final : public QMainWindow {
 public:
     MainWindow() {
         setWindowTitle(tr("VST Host Experiment"));
-        resize(980, 820);
-        setMinimumSize(820, 680);
+        resize(1080, 740);
+        setMinimumSize(800, 560);
 
         auto* central = new QWidget(this);
         auto* root = new QVBoxLayout(central);
+        root->setContentsMargins(12, 12, 12, 12);
+        root->setSpacing(8);
+
+        // Two independently resizable columns avoid a tall single stack of
+        // library and chain controls on typical desktop screens.
+        auto* browserPanel = new QGroupBox(tr("Plugin library"), central);
+        auto* browserLayout = new QVBoxLayout(browserPanel);
+        browserLayout->setSpacing(6);
+        auto* chainPanel = new QGroupBox(tr("Processing chain"), central);
+        auto* chainLayout = new QVBoxLayout(chainPanel);
+        chainLayout->setSpacing(6);
+        auto* columns = new QSplitter(Qt::Horizontal, central);
+        workspaceSplitter_ = columns;
+        columns->setChildrenCollapsible(false);
+        columns->addWidget(browserPanel);
+        columns->addWidget(chainPanel);
+        columns->setStretchFactor(0, 1);
+        columns->setStretchFactor(1, 1);
+        root->addWidget(columns, 1);
+
         auto* form = new QFormLayout();
 
         auto* pluginRow = new QWidget(central);
@@ -676,7 +701,7 @@ public:
             }
         });
 #endif
-        form->addRow(tr("Plugin bundle"), pluginRow);
+        // The manual bundle picker belongs to the library, not audio routing.
 
         availablePlugins_ = new QListWidget(central);
         availablePlugins_->setMinimumHeight(130);
@@ -686,21 +711,30 @@ public:
         browserHeader->addStretch(1);
         availableCount_ = new QLabel(tr("0 available"), central);
         browserHeader->addWidget(availableCount_);
-        root->addLayout(browserHeader);
+        browserLayout->addLayout(browserHeader);
         pluginSearch_ = new QLineEdit(central);
         pluginSearch_->setClearButtonEnabled(true);
-        pluginSearch_->setPlaceholderText(tr("Search plugins by name or path…"));
-        root->addWidget(pluginSearch_);
+        pluginSearch_->setPlaceholderText(tr("Find an effect… (Ctrl+F)"));
+        browserLayout->addWidget(pluginSearch_);
         connect(pluginSearch_, &QLineEdit::textChanged, this,
                 [this](const QString&) { applyPluginFilter(); });
-        root->addWidget(availablePlugins_, 1);
+        auto* findShortcut = new QShortcut(QKeySequence::Find, this);
+        connect(findShortcut, &QShortcut::activated, pluginSearch_,
+                [this] { pluginSearch_->setFocus(); pluginSearch_->selectAll(); });
+        browserLayout->addWidget(availablePlugins_, 1);
         auto* availableActions = new QHBoxLayout();
         addSelectedPluginButton_ = new QPushButton(tr("Add selected to chain →"), central);
         refreshPluginListButton_ = new QPushButton(tr("Refresh list"), central);
         availableActions->addWidget(addSelectedPluginButton_);
         availableActions->addWidget(refreshPluginListButton_);
-        root->addLayout(availableActions);
+        browserLayout->addLayout(availableActions);
+        browserLayout->addWidget(pluginRow);
         connect(addSelectedPluginButton_, &QPushButton::clicked, this, [this] { addAvailablePluginToChain(); });
+        connect(availablePlugins_, &QListWidget::itemDoubleClicked, this,
+                [this](QListWidgetItem*) {
+                    if (addSelectedPluginButton_->isEnabled())
+                        addAvailablePluginToChain();
+                });
         connect(refreshPluginListButton_, &QPushButton::clicked, this, [this] { scanPluginDirectories(); });
 
         chainList_ = new QListWidget(central);
@@ -708,19 +742,19 @@ public:
         chainList_->setSelectionMode(QAbstractItemView::SingleSelection);
         chainList_->setDragDropMode(QAbstractItemView::InternalMove);
         chainList_->setToolTip(tr("Select an active effect; double-click it to open its editor while audio runs."));
-        root->addWidget(new QLabel(tr("Processing chain (top to bottom)"), central));
-        root->addWidget(chainList_, 1);
+        chainLayout->addWidget(new QLabel(tr("Effects run from top to bottom"), chainPanel));
+        chainLayout->addWidget(chainList_, 1);
         selectedPluginLabel_ = new QLabel(tr("No effect selected"), central);
         selectedPluginLabel_->setWordWrap(true);
-        root->addWidget(selectedPluginLabel_);
+        chainLayout->addWidget(selectedPluginLabel_);
         bypassSelectedEffect_ = new QCheckBox(
             tr("Bypass selected effect (can change while audio runs)"), central);
         bypassSelectedEffect_->setEnabled(false);
-        root->addWidget(bypassSelectedEffect_);
+        chainLayout->addWidget(bypassSelectedEffect_);
         clearSavedStateButton_ = new QPushButton(
             tr("Clear saved settings for selected effect"), central);
         clearSavedStateButton_->setEnabled(false);
-        root->addWidget(clearSavedStateButton_);
+        chainLayout->addWidget(clearSavedStateButton_);
         connect(clearSavedStateButton_, &QPushButton::clicked, this, [this] {
             if (engine_ || chainList_->currentRow() < 0) return;
             auto* item = chainList_->currentItem();
@@ -748,7 +782,7 @@ public:
         chainActions->addWidget(removePluginButton_);
         chainActions->addWidget(moveUpButton_);
         chainActions->addWidget(moveDownButton_);
-        root->addLayout(chainActions);
+        chainLayout->addLayout(chainActions);
 
         auto* configActions = new QHBoxLayout();
         loadConfigButton_ = new QPushButton(tr("Load configuration…"), central);
@@ -761,10 +795,29 @@ public:
         connect(loadConfigButton_, &QPushButton::clicked, this, [this] { loadConfiguration(); });
         connect(saveConfigButton_, &QPushButton::clicked, this, [this] { saveConfiguration(); });
 
-        root->addWidget(new QLabel(tr("Plugin search directories (Linux and Wine)"), central));
-        pluginDirectories_ = new QListWidget(central);
-        pluginDirectories_->setMaximumHeight(130);
-        root->addWidget(pluginDirectories_);
+        // Plugin-directory management is infrequent: collapse it by default
+        // so the browser and chain get most of the vertical space.
+        auto* directoryToggle = new QToolButton(browserPanel);
+        directoryToggle->setText(tr("Plugin folders and scanning"));
+        directoryToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        directoryToggle->setArrowType(Qt::RightArrow);
+        directoryToggle->setCheckable(true);
+        directoryToggle->setToolTip(tr("Expand to add or remove Linux/Wine plugin locations"));
+        browserLayout->addWidget(directoryToggle);
+        auto* directoryPanel = new QWidget(browserPanel);
+        auto* directoryLayout = new QVBoxLayout(directoryPanel);
+        directoryLayout->setContentsMargins(0, 0, 0, 0);
+        pluginDirectories_ = new QListWidget(directoryPanel);
+        pluginDirectories_->setMaximumHeight(110);
+        directoryLayout->addWidget(pluginDirectories_);
+        browserLayout->addWidget(directoryPanel);
+        directoryPanel->hide();
+        connect(directoryToggle, &QToolButton::toggled, this,
+                [directoryToggle, directoryPanel](bool expanded) {
+                    directoryPanel->setVisible(expanded);
+                    directoryToggle->setArrowType(
+                        expanded ? Qt::DownArrow : Qt::RightArrow);
+                });
         auto* directoryActions = new QHBoxLayout();
         addDirectoryButton_ = new QPushButton(tr("Add Linux directory…"), central);
         addWindowsDirectoryButton_ = new QPushButton(tr("Add Windows directory…"), central);
@@ -774,7 +827,7 @@ public:
         directoryActions->addWidget(addWindowsDirectoryButton_);
         directoryActions->addWidget(removeDirectoryButton_);
         directoryActions->addWidget(scanDirectoriesButton_);
-        root->addLayout(directoryActions);
+        directoryLayout->addLayout(directoryActions);
         connect(addDirectoryButton_, &QPushButton::clicked, this, [this] {
             const auto path = QFileDialog::getExistingDirectory(this, tr("Add Linux VST3 directory"));
             if (!path.isEmpty()) {
@@ -834,8 +887,10 @@ public:
         form->addRow(tr("Latency buffer (frames)"), latency_);
 
         bypass_ = new QCheckBox(tr("Bypass output gain"), central);
-        root->addLayout(form);
-        root->addWidget(bypass_);
+        form->addRow(bypass_);
+        auto* audioPanel = new QGroupBox(tr("Audio routing"), central);
+        audioPanel->setLayout(form);
+        root->insertWidget(0, audioPanel);
 
         auto* actions = new QHBoxLayout();
         startButton_ = new QPushButton(tr("Start audio"), central);
@@ -846,7 +901,7 @@ public:
         actions->addWidget(startButton_);
         actions->addWidget(stopButton_);
         actions->addWidget(editorButton_);
-        root->addLayout(actions);
+        root->insertLayout(1, actions);
 
         status_ = new QLabel(tr("Ready. Add effects to the chain or start without effects for direct microphone routing."), central);
         status_->setWordWrap(true);
@@ -912,6 +967,10 @@ public:
         pollTimer_->setInterval(200);
         connect(pollTimer_, &QTimer::timeout, this, [this] { pollEngine(); });
         loadSettings();
+        // On a first launch, make plugin discovery obvious; returning users
+        // with configured roots keep the workspace compact by default.
+        if (pluginDirectories_->count() == 0 && manualPlugins_.isEmpty())
+            directoryToggle->setChecked(true);
         refreshInputDevices();
         pollTimer_->start();
     }
@@ -1073,11 +1132,16 @@ private:
         gain_->setEnabled(enabled);
         latency_->setEnabled(enabled);
         bypass_->setEnabled(enabled);
+        updateSelectedPlugin();
     }
 
     void loadSettings() {
         QSettings settings(QStringLiteral("VSTHostExperiment"),
                            QStringLiteral("VSTHostExperiment"));
+        const auto workspaceState =
+            settings.value(QStringLiteral("ui/workspaceSplitter")).toByteArray();
+        if (!workspaceState.isEmpty())
+            (void)workspaceSplitter_->restoreState(workspaceState);
         settings.beginGroup(QStringLiteral("audio"));
         const auto paths = settings.value(QStringLiteral("pluginChain")).toStringList();
         const auto kinds = settings.value(QStringLiteral("pluginChainWine")).toList();
@@ -1149,6 +1213,8 @@ private:
         settings.setValue(QStringLiteral("latencyFrames"), latency_->currentText());
         settings.setValue(QStringLiteral("gainBypassed"), bypass_->isChecked());
         settings.endGroup();
+        settings.setValue(QStringLiteral("ui/workspaceSplitter"),
+                          workspaceSplitter_->saveState());
         settings.sync();
     }
 
@@ -1355,6 +1421,7 @@ private:
         chainList_->insertItem(target, item);
         chainList_->setCurrentRow(target);
         updateChainLabels();
+        updateSelectedPlugin();
     }
 
     void startAudio() {
@@ -1435,7 +1502,13 @@ private:
                      item->data(Qt::UserRole + 4).toByteArray().isEmpty()
                          ? QString() : tr(" [saved settings]"))
             : tr("No effect selected"));
-        clearSavedStateButton_->setEnabled(item && !engine_);
+        const int row = chainList_->currentRow();
+        const bool canReorder = !engine_ && !pluginScanPending_;
+        removePluginButton_->setEnabled(canReorder && item != nullptr);
+        moveUpButton_->setEnabled(canReorder && row > 0);
+        moveDownButton_->setEnabled(
+            canReorder && row >= 0 && row < chainList_->count() - 1);
+        clearSavedStateButton_->setEnabled(item && canReorder);
         {
             QSignalBlocker blocker(bypassSelectedEffect_);
             bypassSelectedEffect_->setEnabled(item != nullptr);
@@ -1698,6 +1771,7 @@ private:
         }
     }
 
+    QSplitter* workspaceSplitter_{};
     QLineEdit* pluginPath_{};
     QListWidget* availablePlugins_{};
     QSet<QString> availablePluginPaths_;

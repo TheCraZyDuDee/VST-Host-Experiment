@@ -118,7 +118,9 @@ if(VST_HOST_BUILD_GUI)
     endif()
 
     find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
-    find_package(X11 REQUIRED)
+    # X11 is only needed for legacy XEmbed plugin editor windows. The Qt
+    # interface and standard VST parameter controls also work on Wayland.
+    find_package(X11 QUIET)
     add_executable(vst-host-gui
         src/gui/main.cpp
         src/audio/pipewire_engine.cpp
@@ -129,7 +131,13 @@ if(VST_HOST_BUILD_GUI)
     target_include_directories(vst-host-gui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(vst-host-gui PRIVATE cxx_std_20)
     target_compile_definitions(vst-host-gui PRIVATE VST_HOST_ENABLE_VST3=1)
-    target_link_libraries(vst-host-gui PRIVATE PkgConfig::PIPEWIRE Qt6::Widgets X11::X11 sdk_hosting ${CMAKE_DL_LIBS})
+    target_link_libraries(vst-host-gui PRIVATE PkgConfig::PIPEWIRE Qt6::Widgets sdk_hosting ${CMAKE_DL_LIBS})
+    if(X11_FOUND)
+        target_link_libraries(vst-host-gui PRIVATE X11::X11)
+        target_compile_definitions(vst-host-gui PRIVATE VST_HOST_HAVE_X11=1)
+    else()
+        message(STATUS "X11 development headers not found; building Wayland-capable Qt GUI with host parameter editor only.")
+    endif()
     if(VST_HOST_ENABLE_VST2)
         target_compile_definitions(vst-host-gui PRIVATE VST_HOST_ENABLE_VST2=1)
         target_include_directories(vst-host-gui PRIVATE "${VST2_SDK_INCLUDE_DIR}")

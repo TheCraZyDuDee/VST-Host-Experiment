@@ -1,6 +1,7 @@
 #include "pipewire_engine.hpp"
 
 #include "stereo_ring_buffer.hpp"
+#include "capture_target_policy.hpp"
 #include "processor_chain.hpp"
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
@@ -8,6 +9,7 @@
 #include "windows_bridge_manager.hpp"
 
 #include <pipewire/pipewire.h>
+#include <spa/utils/dict.h>
 
 #include <algorithm>
 #include <atomic>
@@ -35,6 +37,11 @@ struct EngineState {
     pw_core* core{};
     pw_stream* capture_stream{};
     pw_stream* source_stream{};
+    pw_registry* input_registry{};
+    std::string selected_target_name;
+    std::unordered_set<std::uint32_t> matching_target_nodes;
+    std::atomic<bool> selected_target_present{false};
+    std::atomic<bool> capture_streaming{false};
     StereoRingBuffer ring;
     GainProcessor processor;
     std::vector<std::shared_ptr<Vst3Processor>> plugin_chain;
@@ -69,7 +76,11 @@ void on_capture_process(void* userdata) {
         const auto frames = sample_count / channel_count;
         const auto* samples = reinterpret_cast<const float*>(
             static_cast<const std::uint8_t*>(data.data) + data.chunk->offset);
-        state->ring.push_interleaved(samples, frames);
+        // The session manager should not relink a pinned stream, but guard
+        // against processing a different input during device disappearance.
+        if (state->selected_target_name.empty() ||
+            state->selected_target_present.load(std::memory_order_acquire))
+            state->ring.push_interleaved(samples, frames);
     }
 
     pw_stream_queue_buffer(state->capture_stream, buffer);
@@ -77,8 +88,10 @@ void on_capture_process(void* userdata) {
 
 void on_capture_state_changed(void* userdata, pw_stream_state, pw_stream_state state,
                               const char* error) {
+    auto* data = static_cast<EngineState*>(userdata);
+    data->capture_streaming.store(state == PW_STREAM_STATE_STREAMING,
+                                  std::memory_order_release);
     if (state == PW_STREAM_STATE_ERROR) {
-        auto* data = static_cast<EngineState*>(userdata);
         data->setup_error_message = std::string("PipeWire capture stream error: ") +
             (error != nullptr ? error : "unknown error");
         std::fprintf(stderr, "%s\n", data->setup_error_message.c_str());
@@ -110,10 +123,21 @@ void on_source_process(void* userdata) {
         // Allow a small scheduling cushion: a tight two-period cap can discard
         // valid microphone samples on every callback with mismatched quanta.
         // Old audio is still trimmed if capture gets far ahead of playback.
-        state->ring.pop_interleaved(samples, frames,
-            std::max<std::size_t>(1024, state->latency_frames * 4));
-        state->processor_chain.process(samples, frames);
-        state->processor.process(samples, frames);
+        // Keep the virtual microphone available, but never relay another mic
+        // or plugin-generated output while the explicitly pinned input is
+        // absent. Don't replay buffered audio after it reconnects.
+        const bool pinned_input_unavailable =
+            !state->selected_target_name.empty() &&
+            (!state->selected_target_present.load(std::memory_order_acquire) ||
+             !state->capture_streaming.load(std::memory_order_acquire));
+        if (pinned_input_unavailable) {
+            mute_disconnected_capture(state->ring, samples, frames);
+        } else {
+            state->ring.pop_interleaved(samples, frames,
+                std::max<std::size_t>(1024, state->latency_frames * 4));
+            state->processor_chain.process(samples, frames);
+            state->processor.process(samples, frames);
+        }
 
         data.chunk->offset = 0;
         data.chunk->stride = static_cast<int32_t>(frame_bytes);
@@ -136,6 +160,49 @@ void on_source_state_changed(void* userdata, pw_stream_state, pw_stream_state st
         }
     }
 }
+
+// Device node IDs can change after unplug/replug; node.name is the saved
+// stable identity selected by the GUI. Registry notifications run on the
+// PipeWire main-loop thread, not the real-time processing thread.
+void on_input_registry_global(void* userdata, std::uint32_t id, std::uint32_t,
+                              const char* type, std::uint32_t,
+                              const spa_dict* properties) {
+    auto* state = static_cast<EngineState*>(userdata);
+    if (state->selected_target_name.empty() || !type || !properties ||
+        std::strcmp(type, PW_TYPE_INTERFACE_Node) != 0) return;
+
+    const auto* node_name = spa_dict_lookup(properties, PW_KEY_NODE_NAME);
+    const auto* media_class = spa_dict_lookup(properties, PW_KEY_MEDIA_CLASS);
+    if (!node_name || !media_class ||
+        state->selected_target_name != node_name ||
+        (std::strcmp(media_class, "Audio/Source") != 0 &&
+         std::strcmp(media_class, "Audio/Source/Virtual") != 0)) return;
+
+    const bool was_available = !state->matching_target_nodes.empty();
+    state->matching_target_nodes.insert(id);
+    state->selected_target_present.store(true, std::memory_order_release);
+    if (!was_available)
+        std::fprintf(stderr, "Selected microphone connected: %s\n",
+                     state->selected_target_name.c_str());
+}
+
+void on_input_registry_global_remove(void* userdata, std::uint32_t id) {
+    auto* state = static_cast<EngineState*>(userdata);
+    if (state->matching_target_nodes.erase(id) == 0 ||
+        !state->matching_target_nodes.empty()) return;
+    state->selected_target_present.store(false, std::memory_order_release);
+    std::fprintf(stderr,
+                 "Selected microphone unavailable; keeping virtual mic silent until %s returns.\n",
+                 state->selected_target_name.c_str());
+}
+
+const pw_registry_events input_registry_events = [] {
+    pw_registry_events events{};
+    events.version = PW_VERSION_REGISTRY_EVENTS;
+    events.global = on_input_registry_global;
+    events.global_remove = on_input_registry_global_remove;
+    return events;
+}();
 
 const pw_stream_events capture_events = [] {
     pw_stream_events events{};
@@ -161,6 +228,7 @@ struct PipeWireEngine::Impl {
         state.processor.set_gain(options.gain);
         state.processor.set_bypassed(options.bypass);
         state.latency_frames = options.latency_frames;
+        state.selected_target_name = options.input_target;
     }
 
     PipeWireOptions options;
@@ -175,6 +243,7 @@ struct PipeWireEngine::Impl {
 
     spa_hook capture_listener{};
     spa_hook source_listener{};
+    spa_hook input_registry_listener{};
     bool initialized{false};
     std::atomic<pw_main_loop*> published_loop{nullptr};
     std::atomic<bool> published_running{false};
@@ -240,9 +309,17 @@ struct PipeWireEngine::Impl {
             nullptr);
         if (properties == nullptr)
             return fail("Could not allocate PipeWire capture stream properties.", -ENOMEM);
-        if (!options.input_target.empty()) {
+        const auto policy = capture_target_policy(options.input_target);
+        if (policy.pinned) {
             pw_properties_set(properties, PW_KEY_TARGET_OBJECT,
                               options.input_target.c_str());
+            // WirePlumber: do not link a missing target to another microphone.
+            // Linger keeps our capture node alive until this SAME node.name
+            // returns. Do not use node.dont-reconnect/PW_STREAM_FLAG_DONT_RECONNECT:
+            // those destroy the stream instead of waiting for reconnection.
+            pw_properties_set(properties, "node.dont-fallback", "true");
+            pw_properties_set(properties, "node.linger", "true");
+            pw_properties_set(properties, "node.dont-move", "true");
         }
 
         state.capture_stream = pw_stream_new(
@@ -289,6 +366,10 @@ PipeWireEngine::~PipeWireEngine() {
     if (impl_->state.capture_stream != nullptr) {
         pw_stream_destroy(impl_->state.capture_stream);
     }
+    if (impl_->state.input_registry != nullptr) {
+        spa_hook_remove(&impl_->input_registry_listener);
+        pw_proxy_destroy(reinterpret_cast<pw_proxy*>(impl_->state.input_registry));
+    }
     if (impl_->state.source_stream != nullptr) {
         pw_stream_destroy(impl_->state.source_stream);
     }
@@ -316,6 +397,13 @@ void PipeWireEngine::request_stop() noexcept {
 
 bool PipeWireEngine::is_running() const noexcept {
     return impl_ && impl_->published_running.load(std::memory_order_acquire);
+}
+
+bool PipeWireEngine::selected_input_available() const noexcept {
+    if (!impl_) return false;
+    if (impl_->state.selected_target_name.empty()) return true;
+    return impl_->state.selected_target_present.load(std::memory_order_acquire) &&
+           impl_->state.capture_streaming.load(std::memory_order_acquire);
 }
 
 Vst3Processor* PipeWireEngine::plugin_processor() const noexcept {
@@ -402,6 +490,17 @@ int PipeWireEngine::run() {
                        request_shutdown, &impl_->state);
     pw_loop_add_signal(pw_main_loop_get_loop(impl_->state.loop), SIGTERM,
                        request_shutdown, &impl_->state);
+
+    if (!impl_->options.input_target.empty()) {
+        impl_->state.input_registry = pw_core_get_registry(
+            impl_->state.core, PW_VERSION_REGISTRY, 0);
+        if (!impl_->state.input_registry)
+            return impl_->fail(
+                "Could not monitor the selected PipeWire microphone for reconnection.", -EIO);
+        pw_registry_add_listener(impl_->state.input_registry,
+                                 &impl_->input_registry_listener,
+                                 &input_registry_events, &impl_->state);
+    }
 
     auto plugin_paths = impl_->options.plugin_paths;
     // Portable .vsthost and CLI chains may still reference old yabridge

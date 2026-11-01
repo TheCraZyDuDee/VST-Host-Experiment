@@ -719,6 +719,11 @@ public:
         inputLayout->addWidget(refreshDevicesButton);
         form->addRow(tr("Microphone / input"), inputRow);
         connect(refreshDevicesButton, &QPushButton::clicked, this, [this] { refreshInputDevices(); });
+        inputDevice_->setToolTip(tr(
+            "Choose a microphone by its stable PipeWire node name. "
+            "When this device disconnects, the virtual microphone stays silent "
+            "until that SAME device returns. The Default microphone option "
+            "continues to follow system-wide default changes."));
 
         outputName_ = new QLineEdit(QStringLiteral("vst-host-virtual-mic"), central);
         form->addRow(tr("Virtual microphone name"), outputName_);
@@ -913,6 +918,14 @@ private:
         removeDirectoryButton_->setEnabled(enabled);
         scanDirectoriesButton_->setEnabled(enabled);
         loadConfigButton_->setEnabled(enabled);
+        // Routing/gain/latency are startup-only controls. Keep the selected
+        // node name fixed for the running session; only live per-effect bypass
+        // can change without a restart.
+        inputDevice_->setEnabled(enabled);
+        outputName_->setEnabled(enabled);
+        gain_->setEnabled(enabled);
+        latency_->setEnabled(enabled);
+        bypass_->setEnabled(enabled);
     }
 
     void loadSettings() {
@@ -1164,6 +1177,8 @@ private:
         }
 
         auto options = optionsFromUi();
+        activeInputTarget_ = QString::fromStdString(options.input_target);
+        selectedInputAvailable_ = true;
         // Directory discovery populates the browser only. Never let the engine
         // auto-activate unselected Linux plugins or all global bridge wrappers.
         // Headless CLI directory auto-loading remains unchanged.
@@ -1197,6 +1212,8 @@ private:
         setEditingEnabled(true);
         editorButton_->setEnabled(false);
         status_->setText(tr("Audio engine stopped."));
+        activeInputTarget_.clear();
+        selectedInputAvailable_ = true;
         updateSelectedPlugin();
         saveSettings();
     }
@@ -1460,6 +1477,18 @@ private:
                 : tr("Audio is running without effects (direct microphone routing)."));
             engineReadyShown_ = true;
         }
+        if (engine_->is_running() && !activeInputTarget_.isEmpty()) {
+            const bool available = engine_->selected_input_available();
+            if (available != selectedInputAvailable_) {
+                selectedInputAvailable_ = available;
+                status_->setText(available
+                    ? tr("Selected microphone reconnected. Audio resumed: %1")
+                        .arg(activeInputTarget_)
+                    : tr("Waiting for selected microphone: %1. "
+                         "Other microphones will not be used; virtual microphone is silent.")
+                        .arg(activeInputTarget_));
+            }
+        }
     }
 
     QLineEdit* pluginPath_{};
@@ -1506,6 +1535,8 @@ private:
     QPointer<PluginEditorDialog> editorDialog_;
     int editorIndex_{-1};
     bool engineReadyShown_{false};
+    QString activeInputTarget_;
+    bool selectedInputAvailable_{true};
 };
 
 } // namespace

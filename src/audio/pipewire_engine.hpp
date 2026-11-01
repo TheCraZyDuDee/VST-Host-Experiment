@@ -17,8 +17,10 @@ struct AudioDiagnostics {
 };
 
 struct PipeWireOptions {
-    // Optional PipeWire node id/name for the microphone. If empty, the default
-    // source is selected through PipeWire's autoconnect behavior.
+    // Stable PipeWire node.name for the selected microphone. A nonempty target
+    // is strictly pinned: no fallback to a different mic on unplug, and the
+    // virtual mic remains silent until this same node.name returns. Empty
+    // means explicitly follow PipeWire's default capture source.
     std::string input_target;
     std::string output_name{"vst-host-virtual-mic"};
     std::string output_description{"VST Host Virtual Microphone"};
@@ -50,6 +52,10 @@ public:
     int run();
     void request_stop() noexcept;
     [[nodiscard]] bool is_running() const noexcept;
+    // When a named source is selected: false until its exact node.name is
+    // present and the capture stream is active. An empty/default input is
+    // intentionally not pinned and always reports true.
+    [[nodiscard]] bool selected_input_available() const noexcept;
     [[nodiscard]] Vst3Processor* plugin_processor() const noexcept;
     [[nodiscard]] Vst3Processor* plugin_processor(std::size_t index) const noexcept;
     // Safe to call from the UI while PipeWire audio processing is active.

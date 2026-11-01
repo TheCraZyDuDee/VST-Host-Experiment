@@ -124,6 +124,11 @@ if(BUILD_TESTING)
     target_compile_features(ring-buffer-test PRIVATE cxx_std_20)
     add_test(NAME ring-buffer-test COMMAND ring-buffer-test)
 
+    add_executable(capture-target-policy-test tests/capture_target_policy_test.cpp)
+    target_include_directories(capture-target-policy-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(capture-target-policy-test PRIVATE cxx_std_20)
+    add_test(NAME capture-target-policy-test COMMAND capture-target-policy-test)
+
     add_executable(parameter-event-queue-test tests/parameter_event_queue_test.cpp)
     target_include_directories(parameter-event-queue-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(parameter-event-queue-test PRIVATE cxx_std_20)
@@ -163,7 +168,7 @@ if(BUILD_TESTING)
     # many existing tests use assert() for both setup and verification.
     if(NOT MSVC)
         foreach(test_target IN ITEMS
-                ring-buffer-test parameter-event-queue-test audio-processor-test config-test
+                ring-buffer-test capture-target-policy-test parameter-event-queue-test audio-processor-test config-test
                 plugin-discovery-test windows-bridge-manager-test processor-chain-test
                 vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)

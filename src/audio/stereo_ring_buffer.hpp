@@ -38,6 +38,14 @@ public:
         }
     }
 
+    // Consumer-only operation used when the pinned microphone is unavailable.
+    // Discards queued pre-disconnect frames without counting synthetic
+    // underruns or blocking the real-time output callback.
+    void discard_pending() noexcept {
+        const auto write = write_index_.load(std::memory_order_acquire);
+        read_index_.store(write, std::memory_order_release);
+    }
+
     // Reads interleaved stereo samples, filling any underrun with silence.
     void pop_interleaved(float* samples, std::size_t frames,
                          std::size_t max_backlog_frames = 512) noexcept {

@@ -190,6 +190,11 @@ if(BUILD_TESTING)
 
     # Check the Linux GCC/Clang legacy aeffect.h calling-convention syntax
     # even when the non-redistributable VST2 SDK is not available in CI.
+    add_executable(vst2-audio-layout-test tests/vst2_audio_layout_test.cpp)
+    target_include_directories(vst2-audio-layout-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(vst2-audio-layout-test PRIVATE cxx_std_20)
+    add_test(NAME vst2-audio-layout-test COMMAND vst2-audio-layout-test)
+
     add_executable(vst2-legacy-abi-compat-test tests/vst2_legacy_abi_compat_test.cpp)
     target_include_directories(vst2-legacy-abi-compat-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(vst2-legacy-abi-compat-test PRIVATE cxx_std_20)
@@ -216,7 +221,7 @@ if(BUILD_TESTING)
         foreach(test_target IN ITEMS
                 ring-buffer-test capture-target-policy-test plugin-state-test parameter-event-queue-test audio-processor-test config-test
                 plugin-discovery-test windows-bridge-manager-test processor-chain-test
-                vst2-legacy-abi-compat-test vst2-processor-test vst3-processor-test)
+                vst2-audio-layout-test vst2-legacy-abi-compat-test vst2-processor-test vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)
         endforeach()
     endif()

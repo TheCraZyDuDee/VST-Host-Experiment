@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 int main() {
@@ -13,6 +14,7 @@ int main() {
     source.latency_frames = 512;
     source.bypass = true;
     source.plugin_paths = {"/plugins/First Effect.vst3", "/plugins/Second.vst3"};
+    source.plugin_bypassed = {false, true};
     source.plugin_directories = {"/plugins/effects", "/home/user/custom-vst3"};
     source.windows_plugin_directories = {"/home/user/.wine/drive_c/Program Files/Common Files/VST3"};
 
@@ -26,6 +28,7 @@ int main() {
     assert(restored.latency_frames == source.latency_frames);
     assert(restored.bypass == source.bypass);
     assert(restored.plugin_paths == source.plugin_paths);
+    assert(restored.plugin_bypassed == source.plugin_bypassed);
     assert(restored.plugin_directories == source.plugin_directories);
     assert(restored.windows_plugin_directories == source.windows_plugin_directories);
 
@@ -36,6 +39,21 @@ int main() {
     restored.input_target = "not default";
     if (!vst_host::audio::load_config(path, restored, error)) return 2;
     if (!restored.input_target.empty()) return 3;
+
+    // Old configuration files omit plugin_bypassed. Every plugin should
+    // start enabled even if a previous load reused the options object.
+    source.plugin_bypassed.clear();
+    assert(vst_host::audio::save_config(path, source, error));
+    assert(vst_host::audio::load_config(path, restored, error));
+    assert(restored.plugin_bypassed.size() == 2 &&
+           !restored.plugin_bypassed[0] && !restored.plugin_bypassed[1]);
+
+    // The bypass key cannot appear before its corresponding plugin.
+    {
+        std::ofstream bad(path, std::ios::trunc);
+        bad << "plugin_bypassed = true\n";
+    }
+    assert(!vst_host::audio::load_config(path, restored, error));
 
     std::filesystem::remove(path);
     return 0;

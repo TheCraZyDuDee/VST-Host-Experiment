@@ -43,6 +43,26 @@ int main() {
         samples[2] != 2.0F || samples[3] != 0.0F) return 4;
     if (chain.latency_frames() != 96) return 5;
 
+    // A running chain can bypass either effect independently, without
+    // reallocating or reordering its prepared processor entries.
+    if (!chain.set_bypassed(1, true) || !chain.is_bypassed(1)) return 7;
+    if (chain.latency_frames() != 32) return 8;
+    float bypass_second[]{0.25F, -0.25F, 0.5F, -0.5F};
+    chain.process(bypass_second, 2);
+    if (bypass_second[0] != 0.5F || bypass_second[1] != -0.5F ||
+        bypass_second[2] != 1.0F || bypass_second[3] != -1.0F) return 9;
+
+    if (!chain.set_bypassed(0, true)) return 10;
+    if (chain.latency_frames() != 0) return 11;
+    float bypass_all[]{0.25F, -0.25F};
+    chain.process(bypass_all, 1);
+    if (bypass_all[0] != 0.25F || bypass_all[1] != -0.25F) return 12;
+
+    if (!chain.set_bypassed(0, false) || !chain.set_bypassed(1, false) ||
+        chain.is_bypassed(0) || chain.is_bypassed(1)) return 13;
+    if (chain.latency_frames() != 96) return 14;
+    if (chain.set_bypassed(2, true)) return 15;
+
     chain.reset();
     if (first.resets() != 1 || second.resets() != 1) return 6;
     return 0;

@@ -176,6 +176,7 @@ struct PipeWireEngine::Impl {
     spa_hook source_listener{};
     bool initialized{false};
     std::atomic<pw_main_loop*> published_loop{nullptr};
+    std::atomic<bool> published_running{false};
     std::atomic<Vst3Processor*> published_plugin{nullptr};
 
     int create_source_stream() {
@@ -312,21 +313,36 @@ void PipeWireEngine::request_stop() noexcept {
     }
 }
 
+bool PipeWireEngine::is_running() const noexcept {
+    return impl_ && impl_->published_running.load(std::memory_order_acquire);
+}
+
 Vst3Processor* PipeWireEngine::plugin_processor() const noexcept {
     return impl_ ? impl_->published_plugin.load(std::memory_order_acquire) : nullptr;
 }
 
 Vst3Processor* PipeWireEngine::plugin_processor(std::size_t index) const noexcept {
-    if (!impl_ || index >= impl_->state.plugin_chain.size()) return nullptr;
+    // The engine builds these vectors on its worker thread. The first-plugin
+    // pointer publishes their finalized contents with release semantics.
+    if (!impl_ || !impl_->published_plugin.load(std::memory_order_acquire) ||
+        index >= impl_->state.plugin_chain.size()) return nullptr;
     return impl_->state.plugin_chain[index].get();
 }
 
+bool PipeWireEngine::set_plugin_bypassed(std::size_t index, bool bypassed) noexcept {
+    if (!impl_ || !impl_->published_plugin.load(std::memory_order_acquire))
+        return false;
+    return impl_->state.processor_chain.set_bypassed(index, bypassed);
+}
+
 std::size_t PipeWireEngine::plugin_count() const noexcept {
-    return impl_ ? impl_->state.plugin_chain.size() : 0;
+    return impl_ && impl_->published_plugin.load(std::memory_order_acquire)
+        ? impl_->state.plugin_chain.size() : 0;
 }
 
 std::string PipeWireEngine::plugin_path(std::size_t index) const {
-    if (!impl_ || index >= impl_->state.plugin_paths.size()) return {};
+    if (!impl_ || !impl_->published_plugin.load(std::memory_order_acquire) ||
+        index >= impl_->state.plugin_paths.size()) return {};
     return impl_->state.plugin_paths[index];
 }
 
@@ -420,6 +436,9 @@ int PipeWireEngine::run() {
                 "'): " + plugin_error, -EINVAL);
         }
         impl_->state.processor_chain.add(*plugin);
+        if (index < impl_->options.plugin_bypassed.size())
+            (void)impl_->state.processor_chain.set_bypassed(
+                index, impl_->options.plugin_bypassed[index]);
         impl_->state.plugin_paths.push_back(plugin_paths[index]);
         impl_->state.plugin_chain.push_back(std::move(plugin));
     }
@@ -457,7 +476,9 @@ int PipeWireEngine::run() {
                         index + 1, plugin->plugin_path().c_str(), plugin->latency_frames());
         }
         std::printf("Press Ctrl+C to stop.\n");
+        impl_->published_running.store(true, std::memory_order_release);
         pw_main_loop_run(impl_->state.loop);
+        impl_->published_running.store(false, std::memory_order_release);
         result = impl_->state.setup_error;
         if (result != 0) {
             impl_->last_error = impl_->state.setup_error_message.empty()

@@ -1,5 +1,11 @@
 name: Linux build
 
+# Only the latest commit of each branch needs a full Linux/Qt/VST3 build.
+# A push and the corresponding PR share one cancellation group.
+concurrency:
+  group: linux-build-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [main, "feature/**"]

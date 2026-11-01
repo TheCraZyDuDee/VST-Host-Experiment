@@ -20,9 +20,10 @@ void print_usage(const char* executable) {
         << "  --save-config FILE  Save effective options before starting\n"
         << "  --input NODE        PipeWire microphone node id/name\n"
         << "  --name NODE_NAME    Virtual microphone node name\n"
-        << "  --plugin PATH       Add a VST3 effect; repeat to add more\n"
+        << "  --plugin PATH       Add an enabled VST3 effect; repeat as needed\n"
+        << "  --plugin-bypassed PATH  Add a VST3 effect initially bypassed\n"
         << "  --plugin-dir PATH   Scan a native Linux plugin directory; repeat as needed\n"
-        << "  --windows-plugin-dir PATH  Register a Windows VST3 directory with Wine/yabridge\n"
+        << "  --windows-plugin-dir PATH  Register a Windows VST3 directory using Wine/vstbridge\n"
         << "  --gain VALUE        Linear gain from 0.0 to 4.0\n"
         << "  --latency-frames N  128, 256, 512, or 1024\n"
         << "  --bypass            Bypass the gain processor\n"
@@ -78,7 +79,8 @@ int main(int argc, char** argv) {
             options.bypass = true;
             continue;
         }
-        if (arg == "--input" || arg == "--name" || arg == "--plugin" || arg == "--plugin-dir" ||
+        if (arg == "--input" || arg == "--name" || arg == "--plugin" ||
+            arg == "--plugin-bypassed" || arg == "--plugin-dir" ||
             arg == "--windows-plugin-dir" ||
             arg == "--gain" || arg == "--latency-frames") {
             if (i + 1 >= argc) {
@@ -108,12 +110,13 @@ int main(int argc, char** argv) {
                     return 2;
                 }
                 options.plugin_directories.emplace_back(value);
-            } else if (arg == "--plugin") {
+            } else if (arg == "--plugin" || arg == "--plugin-bypassed") {
                 if (value.empty()) {
                     std::cerr << "Plugin path cannot be empty.\n";
                     return 2;
                 }
                 options.plugin_paths.emplace_back(value);
+                options.plugin_bypassed.push_back(arg == "--plugin-bypassed");
             } else if (arg == "--gain") {
                 if (!parse_gain(value, options.gain)) {
                     std::cerr << "Gain must be a number between 0.0 and 4.0.\n";

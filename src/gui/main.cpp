@@ -154,6 +154,7 @@ public:
     void raiseWindow() {
         if (!valid() || !standalone_) return;
         XRaiseWindow(display_, window_);
+        if (!children_.empty()) focusPlugin();
         XFlush(display_);
     }
 
@@ -281,7 +282,8 @@ private:
                     XSync(display_, False);
                     sendXEmbedMessage(child, 1); // XEMBED_WINDOW_ACTIVATE
                     sendXEmbedMessage(child, 4); // XEMBED_FOCUS_IN
-                    if (focusOwner_ && focusOwner_->hasFocus()) focusPlugin();
+                    if (standalone_ || (focusOwner_ && focusOwner_->hasFocus()))
+                        focusPlugin();
                     XWindowAttributes childAttributes{};
                     if (XGetWindowAttributes(display_, child, &childAttributes)) {
                         std::fprintf(stderr,
@@ -303,7 +305,8 @@ private:
                     XMoveResizeWindow(display_, child, 0, 0,
                                       static_cast<unsigned int>(lastWidth_),
                                       static_cast<unsigned int>(lastHeight_));
-                    if (focusOwner_ && focusOwner_->hasFocus()) focusPlugin();
+                    if (standalone_ || (focusOwner_ && focusOwner_->hasFocus()))
+                        focusPlugin();
                     XFlush(display_);
                 } else if (event.xreparent.parent != window_) {
                     children_.erase(std::remove(children_.begin(), children_.end(),
@@ -341,10 +344,14 @@ private:
                 break;
             }
             case FocusIn:
+                if (standalone_) focusPlugin();
                 setActive(true);
                 break;
             case FocusOut:
-                setActive(false);
+                // Moving focus into the embedded X11 child is not a
+                // deactivation of its parent plugin window.
+                if (!standalone_ || event.xfocus.detail != NotifyInferior)
+                    setActive(false);
                 break;
             case ClientMessage:
                 if (standalone_ && !closeRequestedSent_ &&

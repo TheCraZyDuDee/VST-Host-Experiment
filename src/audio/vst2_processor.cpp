@@ -232,6 +232,14 @@ void Vst2Processor::idle_editor() noexcept {
 #endif
 }
 
+bool Vst2Processor::has_native_editor() const noexcept {
+#if defined(VST_HOST_ENABLE_VST2)
+    return impl_->effect && (impl_->effect->flags & effFlagsHasEditor) != 0;
+#else
+    return false;
+#endif
+}
+
 std::vector<PluginProcessor::ParameterInfo> Vst2Processor::editor_parameters() const {
     std::vector<ParameterInfo> result;
 #if defined(VST_HOST_ENABLE_VST2)

@@ -1640,6 +1640,345 @@ private:
             });
     }
 
+    [[nodiscard]] QList<vst_host::gui::SavedProfile> storedProfiles() const {
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        return vst_host::gui::saved_profiles(
+            settings, vst_host::gui::user_config_root());
+    }
+
+    void updateProfileActions() {
+        const bool editable = !engine_ && !pluginScanPending_;
+        const bool hasNamedProfile = !activeProfileId_.isEmpty();
+        profileSelector_->setEnabled(editable);
+        saveProfileButton_->setEnabled(editable);
+        profileSaveAsAction_->setEnabled(editable);
+        profileRenameAction_->setEnabled(editable && hasNamedProfile);
+        profileDeleteAction_->setEnabled(editable && hasNamedProfile);
+        profileImportAction_->setEnabled(editable);
+        profileLoadFileAction_->setEnabled(editable);
+        profileExportAction_->setEnabled(editable);
+        // The application menu itself remains accessible during audio:
+        // Preferences, Help and About are safe to open while processing.
+    }
+
+    void refreshProfileSelector() {
+        QSignalBlocker blocker(profileSelector_);
+        profileSelector_->clear();
+        profileSelector_->addItem(tr("Current workspace"), QString());
+        for (const auto& profile : storedProfiles())
+            profileSelector_->addItem(profile.name, profile.id);
+        const auto index = profileSelector_->findData(activeProfileId_);
+        profileSelector_->setCurrentIndex(index < 0 ? 0 : index);
+        if (index < 0) activeProfileId_.clear();
+        updateProfileActions();
+    }
+
+    [[nodiscard]] bool loadSavedProfile(const QString& id,
+                                        bool startDiscovery = true,
+                                        bool quietFailure = false) {
+        if (engine_ || pluginScanPending_) return false;
+        const auto profiles = storedProfiles();
+        const auto it = std::find_if(
+            profiles.cbegin(), profiles.cend(),
+            [&id](const auto& profile) { return profile.id == id; });
+        if (it == profiles.cend()) {
+            status_->setText(tr("Saved profile is missing. No audio was started."));
+            if (!quietFailure)
+                QMessageBox::warning(this, tr("Profile unavailable"),
+                                     tr("This saved profile no longer exists."));
+            return false;
+        }
+
+        vst_host::audio::PipeWireOptions options;
+        std::string error;
+        const auto path = vst_host::gui::profile_file(
+            vst_host::gui::user_config_root(), id);
+        if (!vst_host::audio::load_config(path.toStdString(), options, error)) {
+            status_->setText(tr("Could not load saved profile: %1")
+                .arg(QString::fromStdString(error)));
+            if (!quietFailure)
+                QMessageBox::critical(this, tr("Profile could not be loaded"),
+                                      QString::fromStdString(error));
+            return false;
+        }
+
+        applyOptions(options, false);
+        activeProfileId_ = id;
+        refreshProfileSelector();
+        saveSettings();
+        if (startDiscovery) scanPluginDirectories();
+        status_->setText(tr("Profile loaded: %1").arg(it->name));
+        return true;
+    }
+
+    void switchProfile(int index) {
+        if (engine_ || pluginScanPending_) {
+            refreshProfileSelector();
+            return;
+        }
+        const auto id = profileSelector_->itemData(index).toString();
+        if (id == activeProfileId_) return;
+        if (id.isEmpty()) {
+            // Return to an unnamed working copy without changing its contents.
+            activeProfileId_.clear();
+            refreshProfileSelector();
+            status_->setText(tr("Current workspace selected. The chain is unchanged."));
+            return;
+        }
+        const auto response = QMessageBox::question(
+            this, tr("Load saved profile?"),
+            tr("Loading another profile replaces the current chain and routing. "
+               "Any unsaved profile changes will be lost. Continue?"),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (response != QMessageBox::Yes || !loadSavedProfile(id))
+            refreshProfileSelector();
+    }
+
+    [[nodiscard]] QString requestProfileName(const QString& suggested,
+                                             const QString& exceptId = {}) {
+        bool accepted = false;
+        const auto name = QInputDialog::getText(
+            this, tr("Profile name"), tr("Name for the saved profile:"),
+            QLineEdit::Normal, suggested, &accepted).trimmed();
+        if (!accepted || name.isEmpty()) return {};
+        if (name.size() > 80 || name.contains(QLatin1Char('\n')) ||
+            name.contains(QLatin1Char('\r'))) {
+            QMessageBox::warning(this, tr("Invalid profile name"),
+                                 tr("Use a name of 80 characters or fewer, without newlines."));
+            return {};
+        }
+        for (const auto& profile : storedProfiles()) {
+            if (profile.id != exceptId &&
+                profile.name.compare(name, Qt::CaseInsensitive) == 0) {
+                QMessageBox::warning(this, tr("Profile already exists"),
+                                     tr("Choose a different profile name."));
+                return {};
+            }
+        }
+        return name;
+    }
+
+    [[nodiscard]] QString createSavedProfile(
+        const QString& name, const vst_host::audio::PipeWireOptions& options) {
+        const auto root = vst_host::gui::user_config_root();
+        const auto id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        const auto path = vst_host::gui::profile_file(root, id);
+        if (!QDir().mkpath(vst_host::gui::profiles_directory(root))) {
+            QMessageBox::critical(this, tr("Could not save profile"),
+                                  tr("Cannot create the user profile directory."));
+            return {};
+        }
+        std::string error;
+        if (!vst_host::audio::save_config(path.toStdString(), options, error)) {
+            QMessageBox::critical(this, tr("Could not save profile"),
+                                  QString::fromStdString(error));
+            return {};
+        }
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        if (!vst_host::gui::record_profile(settings, id, name)) {
+            QFile::remove(path);
+            QMessageBox::critical(this, tr("Could not save profile"),
+                                  tr("Could not save the profile index."));
+            return {};
+        }
+        return id;
+    }
+
+    void saveCurrentProfile() {
+        if (engine_ || pluginScanPending_) return;
+        if (activeProfileId_.isEmpty()) {
+            saveProfileAs();
+            return;
+        }
+        const auto path = vst_host::gui::profile_file(
+            vst_host::gui::user_config_root(), activeProfileId_);
+        std::string error;
+        if (!vst_host::audio::save_config(path.toStdString(), optionsFromUi(), error)) {
+            QMessageBox::critical(this, tr("Could not save profile"),
+                                  QString::fromStdString(error));
+            return;
+        }
+        status_->setText(tr("Saved profile: %1").arg(profileSelector_->currentText()));
+        saveSettings();
+    }
+
+    void saveProfileAs() {
+        if (engine_ || pluginScanPending_) return;
+        const auto name = requestProfileName(tr("New profile"));
+        if (name.isEmpty()) return;
+        const auto id = createSavedProfile(name, optionsFromUi());
+        if (id.isEmpty()) return;
+        activeProfileId_ = id;
+        refreshProfileSelector();
+        saveSettings();
+        status_->setText(tr("Created saved profile: %1").arg(name));
+    }
+
+    void renameProfile() {
+        if (engine_ || pluginScanPending_ || activeProfileId_.isEmpty()) return;
+        const auto name = requestProfileName(
+            profileSelector_->currentText(), activeProfileId_);
+        if (name.isEmpty()) return;
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        if (!vst_host::gui::record_profile(settings, activeProfileId_, name)) {
+            QMessageBox::critical(this, tr("Could not rename profile"),
+                                  tr("The profile index could not be updated."));
+            return;
+        }
+        refreshProfileSelector();
+        status_->setText(tr("Renamed profile to %1.").arg(name));
+    }
+
+    void deleteProfile() {
+        if (engine_ || pluginScanPending_ || activeProfileId_.isEmpty()) return;
+        if (QMessageBox::question(
+                this, tr("Delete saved profile?"),
+                tr("Delete the saved profile '%1'? The current workspace "
+                   "will remain unchanged.").arg(profileSelector_->currentText()),
+                QMessageBox::Yes | QMessageBox::Cancel,
+                QMessageBox::Cancel) != QMessageBox::Yes) return;
+        const auto path = vst_host::gui::profile_file(
+            vst_host::gui::user_config_root(), activeProfileId_);
+        if (QFileInfo::exists(path) && !QFile::remove(path)) {
+            QMessageBox::critical(this, tr("Could not delete profile"),
+                                  tr("Could not remove saved profile file."));
+            return;
+        }
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        vst_host::gui::unrecord_profile(settings, activeProfileId_);
+        activeProfileId_.clear();
+        refreshProfileSelector();
+        status_->setText(tr("Saved profile removed. Current chain is unchanged."));
+    }
+
+    void importProfile() {
+        if (engine_ || pluginScanPending_) return;
+        const auto path = QFileDialog::getOpenFileName(
+            this, tr("Import profile"), QString(),
+            tr("VST Host profiles (*.vsthost);;All files (*)"));
+        if (path.isEmpty()) return;
+        vst_host::audio::PipeWireOptions options;
+        std::string error;
+        if (!vst_host::audio::load_config(path.toStdString(), options, error)) {
+            QMessageBox::critical(this, tr("Could not import profile"),
+                                  QString::fromStdString(error));
+            return;
+        }
+        const auto name = requestProfileName(QFileInfo(path).completeBaseName());
+        if (name.isEmpty()) return;
+        const auto id = createSavedProfile(name, options);
+        if (id.isEmpty()) return;
+        (void)loadSavedProfile(id);
+    }
+
+    void showPreferences() {
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        QDialog dialog(this);
+        dialog.setWindowTitle(tr("Preferences"));
+        dialog.resize(470, 250);
+        auto* layout = new QVBoxLayout(&dialog);
+        auto* login = new QCheckBox(tr("Launch VST Host when I log in"), &dialog);
+        login->setChecked(settings.value(QStringLiteral("autostart/enabled"), false).toBool());
+        layout->addWidget(login);
+
+        auto* form = new QFormLayout();
+        auto* selected = new QComboBox(&dialog);
+        selected->addItem(tr("No saved profile"), QString());
+        for (const auto& profile : storedProfiles())
+            selected->addItem(profile.name, profile.id);
+        const auto preferred = settings.value(
+            QStringLiteral("autostart/profileId")).toString();
+        const auto index = selected->findData(preferred);
+        selected->setCurrentIndex(index >= 0 ? index : 0);
+        form->addRow(tr("Login profile"), selected);
+        layout->addLayout(form);
+
+        auto* autoAudio = new QCheckBox(
+            tr("Start the virtual microphone automatically at login"), &dialog);
+        autoAudio->setChecked(settings.value(
+            QStringLiteral("autostart/startAudio"), false).toBool());
+        layout->addWidget(autoAudio);
+        const auto updateEnabled = [login, selected, autoAudio] {
+            selected->setEnabled(login->isChecked());
+            autoAudio->setEnabled(login->isChecked() &&
+                                  !selected->currentData().toString().isEmpty());
+            if (!autoAudio->isEnabled()) autoAudio->setChecked(false);
+        };
+        connect(login, &QCheckBox::toggled, &dialog, updateEnabled);
+        connect(selected, &QComboBox::currentIndexChanged, &dialog, updateEnabled);
+        updateEnabled();
+
+        auto* explanation = new QLabel(
+            tr("Autostart is off by default. Only a login launch uses these "
+               "settings; opening the app normally will not start audio. "
+               "Choose a saved profile for automatic audio startup. "
+               "For a stable launcher path, install the app in your user "
+               "directory first."), &dialog);
+        explanation->setWordWrap(true);
+        layout->addWidget(explanation);
+        auto* buttons = new QDialogButtonBox(
+            QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+        layout->addWidget(buttons);
+        connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+        connect(buttons, &QDialogButtonBox::accepted, &dialog, [&] {
+            QString error;
+            if (!vst_host::gui::set_login_autostart(
+                    vst_host::gui::user_config_root(),
+                    QCoreApplication::applicationFilePath(),
+                    login->isChecked(), error)) {
+                QMessageBox::critical(&dialog, tr("Autostart could not be updated"), error);
+                return;
+            }
+            settings.setValue(QStringLiteral("autostart/enabled"), login->isChecked());
+            settings.setValue(QStringLiteral("autostart/profileId"),
+                              selected->currentData().toString());
+            settings.setValue(QStringLiteral("autostart/startAudio"),
+                              login->isChecked() && autoAudio->isChecked());
+            settings.sync();
+            if (settings.status() != QSettings::NoError) {
+                QMessageBox::warning(&dialog, tr("Preferences could not be saved"),
+                                     tr("The desktop entry was updated but "
+                                        "preferences could not be persisted."));
+                return;
+            }
+            dialog.accept();
+        });
+        dialog.exec();
+    }
+
+    void showHelp() {
+        QMessageBox dialog(this);
+        dialog.setWindowTitle(tr("Getting started"));
+        dialog.setText(tr(
+            "1. Choose a microphone and your desired virtual microphone name.\n"
+            "2. Add plugins to the processing chain, then start audio.\n"
+            "3. Stop audio to save plugin states and named profiles.\n"
+            "4. Switch profiles from the selector, or manage them using the ⋮ menu.\n"
+            "5. Set login autostart and its profile under Preferences.\n\n"
+            "Select the virtual microphone in OBS, Discord or another app."));
+        auto* guide = dialog.addButton(tr("Open online guide"), QMessageBox::ActionRole);
+        dialog.addButton(QMessageBox::Close);
+        dialog.exec();
+        if (dialog.clickedButton() == guide)
+            QDesktopServices::openUrl(QUrl(QStringLiteral(
+                "https://github.com/TheCraZyDuDee/VST-Host-Experiment/blob/main/docs/getting-started.md")));
+    }
+
+    void showAbout() {
+        QMessageBox::about(this, tr("About VST Host Experiment"),
+            tr("<b>VST Host Experiment</b> · version %1<br>"
+               "PipeWire virtual microphone and VST2/VST3 effect host.<br>"
+               "Qt GUI for Wayland and X11, with optional XWayland plugin editors.<br><br>"
+               "<a href=\"https://github.com/TheCraZyDuDee/VST-Host-Experiment\">"
+               "Project repository</a>")
+                .arg(QCoreApplication::applicationVersion()));
+    }
+
     void loadConfiguration() {
         if (engine_ || pluginScanPending_) return;
         const auto path = QFileDialog::getOpenFileName(

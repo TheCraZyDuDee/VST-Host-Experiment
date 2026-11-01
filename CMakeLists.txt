@@ -172,6 +172,11 @@ if(BUILD_TESTING)
     target_compile_features(nonfinite-sanitizer-test PRIVATE cxx_std_20)
     add_test(NAME nonfinite-sanitizer-test COMMAND nonfinite-sanitizer-test)
 
+    add_executable(process-cpu-meter-test tests/process_cpu_meter_test.cpp)
+    target_include_directories(process-cpu-meter-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(process-cpu-meter-test PRIVATE cxx_std_20)
+    add_test(NAME process-cpu-meter-test COMMAND process-cpu-meter-test)
+
     add_executable(capture-target-policy-test tests/capture_target_policy_test.cpp)
     target_include_directories(capture-target-policy-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(capture-target-policy-test PRIVATE cxx_std_20)
@@ -253,7 +258,7 @@ if(BUILD_TESTING)
     # many existing tests use assert() for both setup and verification.
     if(NOT MSVC)
         foreach(test_target IN ITEMS
-                ring-buffer-test buffer-bounds-test stereo-level-meter-test nonfinite-sanitizer-test capture-target-policy-test plugin-state-test parameter-event-queue-test audio-processor-test config-test
+                ring-buffer-test buffer-bounds-test stereo-level-meter-test nonfinite-sanitizer-test process-cpu-meter-test capture-target-policy-test plugin-state-test parameter-event-queue-test audio-processor-test config-test
                 headless-config-parity-test plugin-discovery-test windows-bridge-manager-test processor-chain-test
                 windows-plugin-scope-test vst2-audio-layout-test vst2-legacy-abi-compat-test vst2-processor-test vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)

@@ -75,6 +75,69 @@ not native VST3 plugin state. yabridge and vstbridge have distinct global
 configuration and plugin wrapper directories. Removing a Windows search
 directory from our UI does not unregister it from the external bridge.
 
+## Duplicate Windows VST3 plugins and overlapping search roots
+
+vstbridge and yabridge keep a **global** list of Windows plugin directories
+that is shared with other DAWs. Their sync tools mirror each registered
+directory's relative layout into the native wrapper directory. Registering
+both `.../Windows Plugins` **and** its `.../Windows Plugins/VST3` child can
+create two wrapper bundles for one physical Windows plugin, for example:
+
+```text
+~/.vst3/vstbridge/rnnoise.vst3
+~/.vst3/vstbridge/VST3/rnnoise.vst3
+```
+
+These wrappers may contain different Linux `.so` file paths but reference
+the **same original Windows VST3 module** through the symlinks inside
+`Contents/x86_64-win`. Path-based deduplication is insufficient.
+
+The host now protects against this at two levels:
+
+- On a GUI scan, collapse aliases that resolve to the same original Windows
+  module, including aliases found through saved chains or Linux scan roots.
+  Prefer a shorter stable wrapper path. The UI reports how many duplicate
+  library entries it hid. **Explicitly chosen duplicate instances in a
+  processing chain remain untouched**.
+- When adding Windows search directories to the bridge, first query
+  `vstbridgectl list` (or `yabridgectl list`) and skip registration of
+  a child already covered by an existing registered parent. When both roots
+  are configured in one scan, add the parent first and skip its child. If
+  the global bridge configuration already contains overlapping roots, show
+  a warning but **do not alter it**. The headless auto-loader also avoids
+  loading two discovered wrappers for one Windows module.
+
+### Cleaning up existing duplicated wrappers (manual)
+
+First, verify the globally registered roots and keep **one** suitable
+directory that contains the desired Windows VST3 plugins:
+
+```sh
+vstbridgectl list
+```
+
+If that output shows both a parent and its `VST3` subdirectory, remove
+**only the redundant registration** after checking whether other DAWs use it:
+
+```sh
+# Example only — replace with the exact redundant path shown by 'list'.
+vstbridgectl rm "/path/to/Windows Plugins"
+vstbridgectl sync --prune
+```
+
+Do not run `rm` blindly or delete folders under `~/.vst3/vstbridge`
+manually: `sync --prune` can remove globally managed wrappers that no
+longer match the registered paths, including wrappers used by other hosts.
+Also remove the redundant Windows search directory from VST Host
+Experiment's own directory list if it is present, or the next Scan all
+may register it again. If the problem only affects the browser and you
+want to keep all existing registrations, **no cleanup is required**; the
+host hides equivalent aliases without touching files.
+
+The same commands work with `yabridgectl` if yabridge is explicitly
+selected. Distinct Windows modules with the same display name remain
+separate because deduplication uses canonical module targets, not names.
+
 ## Runtime behavior
 
 The bridge must be prepared before PipeWire audio starts. No bridge launch,

@@ -32,6 +32,7 @@
 #include <QTabWidget>
 #include <QFrame>
 #include <QSettings>
+#include <QSet>
 #include <QPointer>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -760,6 +761,7 @@ public:
                 pluginPath_->setText(path);
                 if (!manualPlugins_.contains(path)) manualPlugins_.append(path);
                 addAvailablePlugin(path, false);
+                availablePlugins_->sortItems(Qt::AscendingOrder);
                 applyPluginFilter();
                 saveSettings();
             }
@@ -992,16 +994,12 @@ private:
     }
 
     void addAvailablePlugin(const QString& path, bool wine) {
-        if (path.trimmed().isEmpty()) return;
-        for (int i = 0; i < availablePlugins_->count(); ++i) {
-            auto* existing = availablePlugins_->item(i);
-            if (existing->data(Qt::UserRole).toString() == path) return;
-        }
+        if (path.trimmed().isEmpty() || availablePluginPaths_.contains(path)) return;
+        availablePluginPaths_.insert(path);
         auto* item = new QListWidgetItem(displayPluginName(path, wine), availablePlugins_);
         item->setData(Qt::UserRole, path);
         item->setData(Qt::UserRole + 1, wine);
         item->setToolTip(path);
-        availablePlugins_->sortItems(Qt::AscendingOrder);
     }
 
     void addAvailablePluginToChain() {
@@ -1337,8 +1335,12 @@ private:
             const auto selected = availablePlugins_->currentItem()
                 ? availablePlugins_->currentItem()->data(Qt::UserRole).toString() : QString();
             availablePlugins_->clear();
+            availablePluginPaths_.clear();
             for (const auto& entry : result.plugins)
                 addAvailablePlugin(QString::fromStdString(entry.first), entry.second);
+            // Sort once after the bulk scan. Sorting after every insertion
+            // creates quadratic UI work on large VST3 libraries.
+            availablePlugins_->sortItems(Qt::AscendingOrder);
             applyPluginFilter();
             for (int i = 0; i < availablePlugins_->count(); ++i) {
                 if (availablePlugins_->item(i)->data(Qt::UserRole).toString() == selected) {
@@ -1411,6 +1413,7 @@ private:
 
     QLineEdit* pluginPath_{};
     QListWidget* availablePlugins_{};
+    QSet<QString> availablePluginPaths_;
     QLineEdit* pluginSearch_{};
     QLabel* availableCount_{};
     QListWidget* chainList_{};

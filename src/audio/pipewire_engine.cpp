@@ -47,6 +47,8 @@ struct EngineState {
     std::atomic<bool> selected_target_present{false};
     std::atomic<bool> capture_streaming{false};
     StereoRingBuffer ring;
+    StereoLevelMeter input_meter;
+    StereoLevelMeter output_meter;
     GainProcessor processor;
     std::vector<std::shared_ptr<PluginProcessor>> plugin_chain;
     std::vector<std::string> plugin_paths;
@@ -85,8 +87,10 @@ void on_capture_process(void* userdata) {
                 static_cast<const std::uint8_t*>(data.data) + data.chunk->offset);
             // A pinned source must not silently process a different input.
             if (state->selected_target_name.empty() ||
-                state->selected_target_present.load(std::memory_order_acquire))
+                state->selected_target_present.load(std::memory_order_acquire)) {
+                state->input_meter.observe(samples, frames);
                 state->ring.push_interleaved(samples, frames);
+            }
         }
     }
 
@@ -145,6 +149,7 @@ void on_source_process(void* userdata) {
             state->processor_chain.process(samples, frames);
             state->processor.process(samples, frames);
         }
+        state->output_meter.observe(samples, frames);
 
         data.chunk->offset = 0;
         data.chunk->stride = static_cast<int32_t>(frame_bytes);
@@ -463,6 +468,14 @@ AudioDiagnostics PipeWireEngine::diagnostics() const noexcept {
         .dropped_frames = impl_->state.ring.dropped_frames(),
         .stale_frames = impl_->state.ring.stale_frames(),
         .underrun_frames = impl_->state.ring.underrun_frames(),
+    };
+}
+
+AudioLevelReadings PipeWireEngine::level_readings() const noexcept {
+    if (!impl_) return {};
+    return AudioLevelReadings{
+        .input = impl_->state.input_meter.reading(),
+        .output = impl_->state.output_meter.reading(),
     };
 }
 

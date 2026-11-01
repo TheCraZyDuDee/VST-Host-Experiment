@@ -394,6 +394,12 @@ public:
         parameterScroll_ = new QScrollArea(tabs_);
         parameterScroll_->setWidgetResizable(true);
         tabs_->addTab(parameterScroll_, tr("Parameters (host controls)"));
+        // Synchronize host controls with edits made in the native plugin UI
+        // whenever the user returns to this tab. No polling or cross-thread
+        // VST3 calls are necessary while the window stays on Plugin UI.
+        connect(tabs_, &QTabWidget::currentChanged, this, [this](int index) {
+            if (index == 1 && attached_) rebuildParameterPanel();
+        });
         layout->addWidget(tabs_);
         resize(560, 400);
     }

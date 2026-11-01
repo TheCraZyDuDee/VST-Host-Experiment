@@ -1003,7 +1003,7 @@ public:
                                    [this] { showAbout(); });
         profileMenuButton_->setMenu(applicationMenu);
         profileRow->addWidget(profileMenuButton_);
-        root->addLayout(profileRow);
+        root->insertLayout(0, profileRow);
         connect(profileSelector_, &QComboBox::activated, this,
                 [this](int index) { switchProfile(index); });
         connect(saveProfileButton_, &QPushButton::clicked, this,
@@ -1116,7 +1116,7 @@ public:
         form->addRow(bypass_);
         auto* audioPanel = new QGroupBox(tr("Audio routing"), central);
         audioPanel->setLayout(form);
-        root->insertWidget(0, audioPanel);
+        root->insertWidget(1, audioPanel);
 
         auto* actions = new QHBoxLayout();
         startButton_ = new QPushButton(tr("Start audio"), central);
@@ -1127,7 +1127,7 @@ public:
         actions->addWidget(startButton_);
         actions->addWidget(stopButton_);
         actions->addWidget(editorButton_);
-        root->insertLayout(1, actions);
+        root->insertLayout(2, actions);
 
         auto* levelPanel = new QGroupBox(tr("Audio levels (peak / RMS in dBFS)"), central);
         auto* levelRow = new QHBoxLayout(levelPanel);
@@ -1156,7 +1156,7 @@ public:
             };
         addMeterGroup(tr("Input"), inputMeterBars_);
         addMeterGroup(tr("Output"), outputMeterBars_);
-        root->insertWidget(2, levelPanel);
+        root->insertWidget(3, levelPanel);
 
         status_ = new QLabel(tr("Ready. Add effects to the chain or start without effects for direct microphone routing."), central);
         status_->setWordWrap(true);

@@ -60,7 +60,7 @@ Load from the CLI with `./build/vst-host --config my-setup.vsthost`. The CLI's `
 ## Discovery behavior
 
 - **GUI:** scanned plugins populate the **Available plugins** library; they are **not** automatically added to the active chain. Search by name/path.
-- **Headless CLI:** paths from repeated `--plugin-dir` and `--windows-plugin-dir` options are automatically appended to the chain (sorted after explicitly specified plugins).
+- **Headless CLI:** `--config FILE` restores exactly the saved chain; saved search directories do **not** auto-activate other plugins. Only directory flags explicitly supplied on the command line (`--plugin-dir` and `--windows-plugin-dir`) append discovered effects (sorted after explicitly specified plugins).
 - Equivalent wrappers of the same Windows module appear once in the library; intentionally repeated effect instances in an active chain remain separate.
 - Windows discovery respects the selected Windows source folders even when the bridge is globally registered with other directories. See [Windows plugins](windows-vst3-bridge.md).
 

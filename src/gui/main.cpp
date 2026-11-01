@@ -566,6 +566,10 @@ public:
         xembed_->setActive(isActiveWindow());
         xembed_->focusPlugin();
         rebuildParameterPanel();
+        // A number of VST2 effects have no native editor. Host Controls
+        // remain fully usable without presenting an empty plugin canvas.
+        tabs_->setTabEnabled(0, processor_->has_native_editor());
+        tabs_->setCurrentIndex(processor_->has_native_editor() ? 0 : 1);
         return true;
     }
 

@@ -42,7 +42,7 @@ When the named source disappears or capture is inactive, the output stream stays
 | `src/audio/config.hpp` / `plugin_state.hpp` | Portable settings and bounded binary state encoding |
 | `src/gui/main.cpp` | Qt plugin browser, chain controls, device UI, native X11 editor surface |
 
-The GUI scans devices and plugin directories off the UI thread. It retains an explicitly selected processing chain; the headless CLI additionally appends discovered effects automatically. Wine bridge synchronization runs before audio starts, outside audio callbacks.
+The GUI scans devices and plugin directories off the UI thread. It retains an explicitly selected processing chain. The headless CLI restores that same chain from `--config`, without auto-loading other effects from saved library directories; `--plugin-dir` and `--windows-plugin-dir` explicitly opt in to additional automatic effects. Wine bridge synchronization for explicit Windows CLI directory scans runs before audio starts, outside audio callbacks.
 
 ## Parameters and state
 

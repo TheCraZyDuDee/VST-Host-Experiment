@@ -18,6 +18,22 @@ sudo apt install libx11-dev
 
 Check `cmake --version`: the distribution's CMake may be too old for VST3.
 
+## Install for the current user
+
+From the repository root:
+
+```sh
+bash scripts/install-user.sh
+```
+
+This uses the existing CMake build or configures a new GUI/VST3 build, compiles with two jobs, and installs `vst-host-gui` and `vst-host` into `~/.local/bin`. A `~/.local/share/applications/vst-host-experiment.desktop` entry makes the app available in desktop menus under Wayland and X11. No root access or `sudo` is needed. The launcher does not force Qt to use either display protocol.
+
+Use `bash scripts/install-user.sh --no-build` if the current `build/` directory already contains both executables, `--build-dir build-gui` for an alternate directory, or `--prefix /absolute/path` to install elsewhere. The installer does not bundle Wine, bridges, Steinberg VST2 SDK files, PipeWire, Qt or runtime dependencies. To remove the installed binaries and launcher while preserving profiles/preferences:
+
+```sh
+bash scripts/install-user.sh --uninstall
+```
+
 ## Build and run
 
 **GUI + VST3 (recommended):**

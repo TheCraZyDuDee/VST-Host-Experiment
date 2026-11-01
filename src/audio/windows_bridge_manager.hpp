@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -124,6 +125,39 @@ inline std::string parse_vst3_location(const std::string& status_output) {
     return {};
 }
 
+// A bridge tool maintains a GLOBAL set of plugin search roots, shared by all
+// audio hosts. If it has both a parent root and its VST3 child, syncing can
+// generate two differently nested wrappers for the very same Windows module.
+inline bool directory_covers(const std::filesystem::path& parent,
+                             const std::filesystem::path& child) {
+    auto ancestor = parent.begin();
+    auto descendant = child.begin();
+    for (; ancestor != parent.end(); ++ancestor, ++descendant) {
+        if (descendant == child.end() || *ancestor != *descendant)
+            return false;
+    }
+    return true;
+}
+
+inline std::vector<std::filesystem::path> parse_registered_plugin_roots(
+    const std::string& listing) {
+    std::vector<std::filesystem::path> roots;
+    std::istringstream input(listing);
+    std::string line;
+    while (std::getline(input, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        if (line.empty()) continue;
+        std::filesystem::path path(line);
+        if (!path.is_absolute()) continue;
+        std::error_code ec;
+        const auto canonical = std::filesystem::weakly_canonical(path, ec);
+        roots.push_back(ec ? path.lexically_normal() : canonical);
+    }
+    std::sort(roots.begin(), roots.end());
+    roots.erase(std::unique(roots.begin(), roots.end()), roots.end());
+    return roots;
+}
+
 inline bool is_executable(const std::filesystem::path& candidate) {
     std::error_code ec;
     return std::filesystem::is_regular_file(candidate, ec) && !ec &&
@@ -210,7 +244,8 @@ inline std::string migrate_vst3_wrapper_path(const std::string& path,
 // when installed. yabridge is a fallback so existing setups keep working.
 // Both tools have the same add/sync/status CLI and output a native VST3 wrapper.
 inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& error,
-                                         WindowsBridgeSelection* selected = nullptr) {
+                                         WindowsBridgeSelection* selected = nullptr,
+                                         std::string* warning = nullptr) {
     if (options.windows_plugin_directories.empty()) return true;
 
     auto bridge = detail::locate_bridge();
@@ -222,6 +257,17 @@ inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& 
     }
     const auto bridge_label = std::string(bridge_name(bridge->backend));
 
+    // Read existing bridge registrations before adding new roots. We must
+    // not remove registrations here: they may belong to other DAWs.
+    std::string registered_output;
+    std::string list_error;
+    std::vector<std::filesystem::path> registered;
+    if (detail::run_bridge_command(
+            {bridge->executable, "list"}, registered_output, list_error))
+        registered = detail::parse_registered_plugin_roots(registered_output);
+
+    std::vector<std::filesystem::path> requested;
+    requested.reserve(options.windows_plugin_directories.size());
     for (const auto& directory : options.windows_plugin_directories) {
         std::error_code ec;
         const std::filesystem::path path(directory);
@@ -235,13 +281,61 @@ inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& 
                     " (" + ec.message() + ")";
             return false;
         }
+        requested.push_back(canonical_path);
+    }
+    // Parent roots first, so a child added in the same scan never creates a
+    // redundant registration. Already registered parents are also respected.
+    std::sort(requested.begin(), requested.end(), [](const auto& a, const auto& b) {
+        return a.string().size() < b.string().size() ||
+               (a.string().size() == b.string().size() && a < b);
+    });
+    requested.erase(std::unique(requested.begin(), requested.end()), requested.end());
+
+    bool overlapping_old_roots = false;
+    for (std::size_t i = 0; i < registered.size(); ++i) {
+        for (std::size_t j = i + 1; j < registered.size(); ++j) {
+            if (detail::directory_covers(registered[i], registered[j]) ||
+                detail::directory_covers(registered[j], registered[i]))
+                overlapping_old_roots = true;
+        }
+    }
+    if (overlapping_old_roots && warning) {
+        *warning += bridge_label + " has overlapping globally registered plugin roots. "
+                    "This may have generated duplicate wrappers. Inspect '"
+                    + bridge->executable + " list' before removing redundant roots and "
+                    "running 'sync --prune'. Existing registrations were not modified.\n";
+    }
+
+    for (const auto& directory : requested) {
+        bool covered = false;
+        for (const auto& registered_dir : registered) {
+            if (detail::directory_covers(registered_dir, directory)) {
+                covered = true;
+                break;
+            }
+        }
+        if (covered) continue;
+
+        bool overlaps_child = false;
+        for (const auto& registered_dir : registered) {
+            if (detail::directory_covers(directory, registered_dir)) {
+                overlaps_child = true;
+                break;
+            }
+        }
+        if (overlaps_child && warning)
+            *warning += "Adding " + directory.string() + " to " + bridge_label +
+                " overlaps an already registered child directory. "
+                "Review '" + bridge->executable + " list' for duplicate roots.\n";
+
         std::string output;
-        if (!detail::run_bridge_command({bridge->executable, "add", canonical_path.string()},
+        if (!detail::run_bridge_command({bridge->executable, "add", directory.string()},
                                         output, error)) {
-            error = "Could not register Windows VST3 directory '" + directory +
+            error = "Could not register Windows VST3 directory '" + directory.string() +
                     "' with " + bridge_label + ".\n" + error;
             return false;
         }
+        registered.push_back(directory);
     }
 
     std::string sync_output;

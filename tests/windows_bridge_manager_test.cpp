@@ -15,7 +15,9 @@ static void make_executable(const fs::path& file, const fs::path& wrapper) {
            << "case \"$1\" in\n"
            << "  status) printf \"VST3 location: '%s'\\n\" \""
            << wrapper.string() << "\" ;;\n"
-           << "  add|sync) exit 0 ;;\n"
+           << "  list) if [ -n \"$BRIDGE_LIST\" ]; then printf '%s\\n' \"$BRIDGE_LIST\"; fi; exit 0 ;;\n"
+           << "  add) printf '%s\\n' \"$2\" >> \"$BRIDGE_ADD_LOG\"; exit 0 ;;\n"
+           << "  sync) exit 0 ;;\n"
            << "  *) exit 1 ;;\n"
            << "esac\n";
     script.close();
@@ -67,6 +69,9 @@ int main() {
 
     setenv("HOME", root.c_str(), 1);
     setenv("PATH", binary_dir.c_str(), 1);
+    const auto add_log = root / "registered-adds.log";
+    setenv("BRIDGE_ADD_LOG", add_log.c_str(), 1);
+    unsetenv("BRIDGE_LIST");
     unsetenv("VSTBRIDGECTL");
     unsetenv("YABRIDGECTL");
     auto preferred = detail::locate_bridge();
@@ -101,6 +106,55 @@ int main() {
     assert(selection.wrapper_directory == old_vst);
     assert(detail::migrate_vst3_wrapper_path(new_bundle.string(), selection) ==
            old_bundle.string());
+
+    // The Windows bridge's 'list' command prints absolute registered roots
+    // one per line; paths can contain spaces. A parent covers its children.
+    const auto nested = windows_dir / "VST3";
+    fs::create_directories(nested);
+    const auto list = windows_dir.string() + "\n" + nested.string() + "\n";
+    auto registered = detail::parse_registered_plugin_roots(list);
+    assert(registered.size() == 2);
+    assert(detail::directory_covers(windows_dir, nested));
+    assert(detail::directory_covers(windows_dir, windows_dir));
+    assert(!detail::directory_covers(nested, windows_dir));
+
+    // When the parent is already registered globally, scanning the nested
+    // VST3 folder must not add a second root and create mirrored wrappers.
+    setenv("BRIDGE_LIST", windows_dir.c_str(), 1);
+    std::ofstream(add_log, std::ios::trunc).close();
+    PipeWireOptions covered;
+    covered.windows_plugin_directories = {nested.string()};
+    std::string warning;
+    assert(prepare_windows_vst3_plugins(covered, error, &selection, &warning));
+    {
+        std::ifstream recorded(add_log);
+        assert(recorded.peek() == std::ifstream::traits_type::eof());
+    }
+
+    // If both directories are newly requested, parent-first registration
+    // avoids the same overlap even if they were configured in reverse order.
+    unsetenv("BRIDGE_LIST");
+    std::ofstream(add_log, std::ios::trunc).close();
+    PipeWireOptions combined;
+    combined.windows_plugin_directories = {nested.string(), windows_dir.string()};
+    assert(prepare_windows_vst3_plugins(combined, error, &selection));
+    {
+        std::ifstream recorded(add_log);
+        std::string line;
+        assert(std::getline(recorded, line) && line == windows_dir.string());
+        assert(!std::getline(recorded, line));
+    }
+
+    // Existing overlapping global registrations are never deleted by us;
+    // the GUI should instead explain how to inspect and prune them.
+    setenv("BRIDGE_LIST", list.c_str(), 1);
+    warning.clear();
+    PipeWireOptions already_duplicated;
+    already_duplicated.windows_plugin_directories = {nested.string()};
+    assert(prepare_windows_vst3_plugins(
+        already_duplicated, error, &selection, &warning));
+    assert(warning.find("overlapping globally registered") != std::string::npos);
+    unsetenv("BRIDGE_LIST");
 
     setenv("YABRIDGECTL", (root / "missing-tool").c_str(), 1);
     assert(!detail::locate_bridge());

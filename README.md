@@ -82,6 +82,25 @@ Each plugin instance currently supports its first main audio input/output bus wi
 
 The output source is intended to appear in applications' microphone/input-device lists as **VST Host Virtual Microphone** (or the name supplied with `--name`). This needs verification on the target distribution and PipeWire version; if the node is exposed as an application stream instead of a selectable source, the virtual-source publication strategy will need adjustment.
 
+### Duplicate Windows plugin entries
+
+If a Windows VST3 appears twice after scanning, check whether vstbridge
+registered both a parent directory and its `VST3` subdirectory. Each
+registration can produce a separate wrapper path for the same Windows module
+(for example `~/.vst3/vstbridge/rnnoise.vst3` and
+`~/.vst3/vstbridge/VST3/rnnoise.vst3`). The host now identifies these
+equivalent wrappers by their **actual original Windows module symlink**, not
+by bundle path or name. It shows one available effect per original module;
+separately chosen instances in the active chain are unaffected.
+
+The bridge registry is shared with other DAWs, so the host will not
+delete wrappers or unregister a directory automatically. It checks for
+overlapping registered roots before adding any new directories and warns if
+overlaps already exist. To inspect or manually clean old registrations,
+see [Windows bridge duplicate-wrapper troubleshooting](docs/windows-vst3-bridge.md#duplicate-windows-vst3-plugins-and-overlapping-search-roots).
+Start with `vstbridgectl list`; only use `rm` and `sync --prune` after
+checking the effects on other hosts.
+
 ## Live per-effect bypass
 
 Select an effect in the **Processing chain** and check **Bypass selected

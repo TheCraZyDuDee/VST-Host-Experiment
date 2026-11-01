@@ -40,3 +40,11 @@ jobs:
         run: cmake -S . -B build-gui -DCMAKE_BUILD_TYPE=Release -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
       - name: Build GUI and VST3 host
         run: cmake --build build-gui --parallel 2
+      - name: Configure GUI without X11 development libraries
+        run: |
+          cmake -S . -B build-wayland-no-x11 -DCMAKE_BUILD_TYPE=Release \
+            -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON \
+            -DCMAKE_DISABLE_FIND_PACKAGE_X11=ON \
+            -DVST3_SDK_ROOT="$PWD/build-gui/_deps/vst3sdk-src"
+      - name: Build Wayland-compatible GUI without X11
+        run: cmake --build build-wayland-no-x11 --target vst-host-gui --parallel 2

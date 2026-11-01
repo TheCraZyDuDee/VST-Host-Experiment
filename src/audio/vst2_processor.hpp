@@ -21,6 +21,7 @@ public:
                      std::string& error) override;
     void close_editor() noexcept override;
     void idle_editor() noexcept override;
+    bool has_native_editor() const noexcept override;
     std::vector<ParameterInfo> editor_parameters() const override;
     bool set_editor_parameter(std::uint32_t id, double value) override;
     bool prepare(const AudioProcessSpec& spec) override;

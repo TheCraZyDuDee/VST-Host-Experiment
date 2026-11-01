@@ -3,6 +3,7 @@
 #include "audio/pipewire_devices.hpp"
 #include "audio/plugin_discovery.hpp"
 #include "audio/windows_bridge_manager.hpp"
+#include "audio/windows_plugin_scope.hpp"
 #include "audio/vst3_processor.hpp"
 
 #include <QApplication>
@@ -588,6 +589,7 @@ private:
 struct PluginScanResult {
     std::vector<std::pair<std::string, bool>> plugins;
     std::size_t duplicate_aliases{};
+    std::size_t unselected_window_wrappers{};
     std::string warning;
     std::optional<vst_host::audio::WindowsBridgeSelection> bridge;
 };
@@ -1210,6 +1212,7 @@ private:
                 if (!wineDirectories.empty()) {
                     vst_host::audio::PipeWireOptions bridgeOptions;
                     bridgeOptions.windows_plugin_directories = std::move(wineDirectories);
+                    const auto selectedWindowsRoots = bridgeOptions.windows_plugin_directories;
                     std::string error;
                     vst_host::audio::WindowsBridgeSelection selectedBridge;
                     if (!vst_host::audio::prepare_windows_vst3_plugins(
@@ -1233,11 +1236,18 @@ private:
                         // to the running chain without an explicit selection.
                         auto wrappers = vst_host::audio::discover_vst3_plugins(
                             bridgeOptions.plugin_directories, &result.warning);
+                        std::size_t omitted = 0;
+                        wrappers = vst_host::audio::filter_bridge_plugins_to_selected_roots(
+                            wrappers, selectedWindowsRoots, &omitted);
+                        result.unselected_window_wrappers += omitted;
                         for (auto& path : wrappers)
                             result.plugins.emplace_back(std::move(path), true);
 #if defined(VST_HOST_ENABLE_VST2)
                         auto vst2Wrappers = vst_host::audio::discover_vst2_plugins(
                             bridgeOptions.plugin_directories, &result.warning);
+                        vst2Wrappers = vst_host::audio::filter_bridge_plugins_to_selected_roots(
+                            vst2Wrappers, selectedWindowsRoots, &omitted);
+                        result.unselected_window_wrappers += omitted;
                         for (auto& path : vst2Wrappers)
                             result.plugins.emplace_back(std::move(path), true);
 #endif
@@ -1523,8 +1533,11 @@ private:
                     auto* item = chainList_->item(i);
                     if (!item->data(Qt::UserRole + 1).toBool()) continue;
                     const auto oldPath = item->data(Qt::UserRole).toString().toStdString();
-                    const auto newPath = vst_host::audio::detail::migrate_vst3_wrapper_path(
-                        oldPath, *result.bridge);
+                    const auto newPath = vst_host::audio::plugin_format(oldPath) ==
+                            vst_host::audio::PluginFormat::Vst2
+                        ? vst_host::audio::migrate_vst2_wrapper_path(oldPath, *result.bridge)
+                        : vst_host::audio::detail::migrate_vst3_wrapper_path(
+                            oldPath, *result.bridge);
                     if (oldPath == newPath) continue;
                     const auto path = QString::fromStdString(newPath);
                     item->setData(Qt::UserRole, path);
@@ -1570,6 +1583,10 @@ private:
             if (result.duplicate_aliases > 0) {
                 summary += tr(" Hidden %1 duplicate wrapper/browser alias(es).")
                     .arg(result.duplicate_aliases);
+            }
+            if (result.unselected_window_wrappers > 0) {
+                summary += tr(" Excluded %1 bridged plugin(s) from unselected Windows directories.")
+                    .arg(result.unselected_window_wrappers);
             }
             if (!result.warning.empty())
                 summary += QStringLiteral("\n") + QString::fromStdString(result.warning);

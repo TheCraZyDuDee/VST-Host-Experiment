@@ -1127,6 +1127,7 @@ private:
         gain_->setEnabled(enabled);
         latency_->setEnabled(enabled);
         bypass_->setEnabled(enabled);
+        updateSelectedPlugin();
     }
 
     void loadSettings() {
@@ -1409,6 +1410,7 @@ private:
         chainList_->insertItem(target, item);
         chainList_->setCurrentRow(target);
         updateChainLabels();
+        updateSelectedPlugin();
     }
 
     void startAudio() {
@@ -1489,7 +1491,13 @@ private:
                      item->data(Qt::UserRole + 4).toByteArray().isEmpty()
                          ? QString() : tr(" [saved settings]"))
             : tr("No effect selected"));
-        clearSavedStateButton_->setEnabled(item && !engine_);
+        const int row = chainList_->currentRow();
+        const bool canReorder = !engine_ && !pluginScanPending_;
+        removePluginButton_->setEnabled(canReorder && item != nullptr);
+        moveUpButton_->setEnabled(canReorder && row > 0);
+        moveDownButton_->setEnabled(
+            canReorder && row >= 0 && row < chainList_->count() - 1);
+        clearSavedStateButton_->setEnabled(item && canReorder);
         {
             QSignalBlocker blocker(bypassSelectedEffect_);
             bypassSelectedEffect_->setEnabled(item != nullptr);

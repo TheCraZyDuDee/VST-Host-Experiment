@@ -472,7 +472,6 @@ public:
         showNativeEditorButton_->setToolTip(tr(
             "Available when a plug-in has opened a compatible XEmbed editor."));
         nativeLayout->addWidget(showNativeEditorButton_);
-        nativeLayout->addStretch();
         connect(showNativeEditorButton_, &QPushButton::clicked, this,
                 [this] { raisePluginEditor(); });
         tabs_->addTab(nativePage, tr("Plugin UI"));
@@ -489,6 +488,9 @@ public:
 #endif
         if (!hasX11Embedding) {
             surface_->hide();
+            // Stretch only the explanatory Wayland page. The XCB plugin
+            // surface must retain all available space for embedded editors.
+            nativeLayout->addStretch();
             tabs_->setTabToolTip(0, tr(
                 "Show or reopen a compatible plug-in editor in a separate "
                 "XWayland window. It cannot be embedded in native Qt Wayland."));

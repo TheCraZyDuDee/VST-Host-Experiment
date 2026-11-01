@@ -40,6 +40,8 @@ jobs:
         run: cmake -S . -B build-gui -DCMAKE_BUILD_TYPE=Release -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
       - name: Build GUI and VST3 host
         run: cmake --build build-gui --parallel 2
+      - name: Test profile persistence and XDG login autostart
+        run: ctest --test-dir build-gui --output-on-failure -R '^profile-management-test$'
       - name: Verify per-user installation and desktop launcher
         shell: bash
         run: |
@@ -96,6 +98,8 @@ jobs:
           # a compatible plugin editor is actually opened.
           QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=vst-host-ci \
             ./build-wayland-no-x11/vst-host-gui --check-plugin-ui-tab
+          QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=vst-host-ci \
+            ./build-wayland-no-x11/vst-host-gui --check-profile-settings
       - name: Smoke-test XEmbed companion window from native Qt Wayland
         shell: bash
         run: |
@@ -126,4 +130,6 @@ jobs:
             ./build-gui/vst-host-gui --check-xembed-window
           QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=vst-host-xembed-ci DISPLAY=:83 \
             ./build-gui/vst-host-gui --check-plugin-ui-tab
+          QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=vst-host-xembed-ci DISPLAY=:83 \
+            ./build-gui/vst-host-gui --check-profile-settings
 

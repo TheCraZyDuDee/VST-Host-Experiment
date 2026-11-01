@@ -967,6 +967,10 @@ public:
         pollTimer_->setInterval(200);
         connect(pollTimer_, &QTimer::timeout, this, [this] { pollEngine(); });
         loadSettings();
+        // On a first launch, make plugin discovery obvious; returning users
+        // with configured roots keep the workspace compact by default.
+        if (pluginDirectories_->count() == 0 && manualPlugins_.isEmpty())
+            directoryToggle->setChecked(true);
         refreshInputDevices();
         pollTimer_->start();
     }

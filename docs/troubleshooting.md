@@ -25,6 +25,14 @@ cmake --build build --target vst2-processor-test --parallel 1 --verbose
 - If the **nonfinite samples zeroed** counters increase, the input or an effect is returning NaN/Inf audio values. Try an empty chain, then add effects one at a time; avoid using plugins that repeatedly produce nonfinite output. The sanitization protects downstream audio but cannot prevent a faulty plugin from crashing its own process.
 - If output drops out, increase the latency buffer from 128 to 256/512/1024 frames and watch the GUI's dropped/underrun/stale frame counters. **Input** peak/RMS indicates the selected microphone before effects; **Output** indicates the virtual microphone after processing and gain. If input moves but output is silent, bypass effects one by one to identify the stage. **CLIP** indicates a channel reached or exceeded 0 dBFS; reduce the relevant input/plugin gain. Meters display silence if capture stops for several polls and do not measure end-to-end latency. The GUI's **Host CPU** figure is CPU time of this process, not the combined usage of external Wine bridge processes. The active-effect reported latency is a plug-in declaration, not a measured end-to-end hardware/PipeWire delay. PipeWire controls actual graph latency; the setting is a request, not a guarantee.
 
+## Saved profiles or login autostart do not work
+
+- Save an explicit profile using **Save profile** after stopping audio; the last working Qt workspace and a named preset are separate. The profile dropdown only switches while audio is stopped.
+- In **⋮ → Preferences…**, choose a valid saved **Login profile** and enable **Start the virtual microphone automatically at login** if you want audio to start without another click. Simply enabling login launch opens the GUI but does not automatically start audio.
+- Autostart uses the current GUI executable's absolute path. For a stable executable, install with `bash scripts/install-user.sh` first, then save Preferences again if the executable has moved. Check `$XDG_CONFIG_HOME/autostart/vst-host-experiment.desktop` (normally `~/.config/autostart/`).
+- A deleted or invalid startup profile will never silently start audio using an unrelated workspace. Remove the affected profile preference and select a saved preset again.
+- If profile import fails, check the `.vsthost` file and confirm plug-in paths are still available; exporting a portable configuration does not bundle its plug-ins or Wine dependencies.
+
 ## Headless mode sounds different or uses more CPU
 
 A `.vsthost` configuration can contain **both** a selected processing chain and directories for browsing available plugins. Headless `--config FILE` now loads the saved chain **exactly**; it does not load every plugin in those directories or synchronize a global Wine bridge just because the folders are stored in the file.

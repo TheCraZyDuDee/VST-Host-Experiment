@@ -1936,6 +1936,27 @@ private:
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    // Quick diagnostic for a native Qt Wayland session: verify we can create
+    // an independent XEmbed parent on DISPLAY without starting PipeWire or
+    // loading any third-party plugin. This does not test plugin compatibility.
+    if (app.arguments().contains(QStringLiteral("--check-xembed-window"))) {
+#if defined(VST_HOST_HAVE_X11)
+        XEmbedSurface testSurface(0, nullptr, true);
+        if (!testSurface.valid()) {
+            std::fprintf(stderr, "XEmbed parent unavailable: %s\n",
+                         testSurface.error().c_str());
+            return 2;
+        }
+        testSurface.resizeTo(480, 280);
+        std::printf("XEmbed companion window created successfully on DISPLAY=%s.\n",
+                    std::getenv("DISPLAY") ? std::getenv("DISPLAY") : "<unset>");
+        return 0;
+#else
+        std::fprintf(stderr,
+                     "XEmbed editor support is not built (X11 headers were absent).\n");
+        return 2;
+#endif
+    }
     MainWindow window;
     window.show();
     return app.exec();

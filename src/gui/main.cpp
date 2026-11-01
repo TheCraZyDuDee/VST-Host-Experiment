@@ -980,6 +980,7 @@ private:
     }
 
     void addChainPlugin(const QString& path, bool wine, bool bypassed = false) {
+        wine = wine || appearsToBeWineWrapper(path);
         auto* item = new QListWidgetItem(displayPluginName(path, wine), chainList_);
         item->setData(Qt::UserRole, path);
         item->setData(Qt::UserRole + 1, wine);
@@ -1147,6 +1148,7 @@ private:
 
     void addAvailablePlugin(const QString& path, bool wine) {
         if (path.trimmed().isEmpty() || availablePluginPaths_.contains(path)) return;
+        wine = wine || appearsToBeWineWrapper(path);
         availablePluginPaths_.insert(path);
         auto* item = new QListWidgetItem(displayPluginName(path, wine), availablePlugins_);
         item->setData(Qt::UserRole, path);
@@ -1366,8 +1368,8 @@ private:
         const auto* item = chainList_->currentItem();
         selectedPluginLabel_->setText(item
             ? tr("Selected: %1%2 — double-click to edit while running")
-                .arg(QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName() +
-                     (item->data(Qt::UserRole + 1).toBool() ? tr(" (WINE)") : QString()))
+                .arg(displayPluginName(item->data(Qt::UserRole).toString(),
+                                       item->data(Qt::UserRole + 1).toBool()))
                 .arg(item->data(Qt::UserRole + 3).toByteArray().isEmpty() &&
                      item->data(Qt::UserRole + 4).toByteArray().isEmpty()
                          ? QString() : tr(" [saved settings]"))

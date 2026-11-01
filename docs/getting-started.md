@@ -72,6 +72,8 @@ Use `--config` to load the same `.vsthost` file without the Qt frontend:
 ./build/vst-host --config my-setup.vsthost
 ```
 
+With `--config`, the headless host loads **exactly the saved processing chain**, in the same order and with the same bypass/state settings as the GUI. Directory paths stored in the file are library search settings, not instructions to enable every discovered effect. Neither those directories nor the bridge's global registry are scanned or synchronized automatically during a `--config` launch.
+
 Or specify an input, effects and virtual-mic name directly:
 
 ```sh
@@ -83,7 +85,9 @@ Or specify an input, effects and virtual-mic name directly:
   --latency-frames 256
 ```
 
-`--input` is a stable PipeWire **node name**; omit it to use the default input. `--plugin` can be repeated to build an ordered chain. `--plugin-bypassed` adds an initially bypassed instance. Use `--plugin-dir PATH` for native Linux discovery, and `--windows-plugin-dir PATH` for bridged Windows plugins. Unlike the GUI library, the CLI **automatically appends discovered effects** to its processing chain after explicitly listed plugins.
+`--input` is a stable PipeWire **node name**; omit it to use the default input. `--plugin` can be repeated to build an ordered chain. `--plugin-bypassed` adds an initially bypassed instance. Use `--plugin-dir PATH` for native Linux discovery, and `--windows-plugin-dir PATH` for bridged Windows plugins. The CLI **only auto-appends** effects from directories explicitly supplied using `--plugin-dir` or `--windows-plugin-dir` on that invocation; a saved `.vsthost` file never implicitly activates all of its library directories.
+
+**Directory auto-load is opt-in:** `--plugin-dir PATH` and `--windows-plugin-dir PATH` explicitly append plugins discovered under **those command-line roots only**, even when `--config` also contains saved directory paths. They can add significant CPU load or change your audio if unintended. The CLI logs every active plugin in order; compare that list to the GUI chain when diagnosing differences.
 
 Other options: `--gain 0.0..4.0`, `--bypass` (output-gain bypass), and `--save-config FILE` (writes the effective settings **before** audio starts). Options following `--config` can override scalar values; repeated plugin flags append to the configured effects. Stop with Ctrl+C.
 

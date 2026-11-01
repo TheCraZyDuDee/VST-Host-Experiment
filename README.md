@@ -114,7 +114,33 @@ silently replacing it with a nonexistent one. Rescan or re-add that plugin
 from the available browser.
 
 Existing `.vsthost` files and Windows search-directory settings remain
-compatible, and the Host Controls fallback is still available. The bridge
+compatible, and the Host Controls fallback is still available.
+
+### Windows plugin GUI appears frozen until switching tabs
+
+If mouse interactions **change the audio but the native plugin graphics do not
+repaint until the window is hidden/shown or tabs are changed**, there are two
+separate possible causes:
+
+1. **WineD3D redraw issues.** The [upstream yabridge known-issues guide](https://github.com/robbert-vdh/yabridge#known-issues-and-fixes)
+   recommends DXVK for plugins (especially recent JUCE-based ones) that do
+   not redraw when using WineD3D. Check that Vulkan drivers are working, and
+   install DXVK into the **same Wine prefix used by that plugin**. A common
+   command is `WINEPREFIX=/path/to/plugin-prefix winetricks -q dxvk`.
+   Back up the prefix first; do not install DXVK system-wide for every Wine app.
+2. **X11 exposure/invalidation behavior.** Inside the plugin editor, enable
+   **Force plugin GUI refresh (experimental)** to request an X11 repaint at
+   20 Hz while the **Plugin UI** tab is visible. The checkbox defaults to
+   **off**, and its setting is saved across runs. It can cause flickering or
+   increased CPU usage, and may not help when Wine's graphics backend fails
+   to issue Win32 repaint operations. Turn it off if ineffective.
+
+The refresh option does not alter audio processing and stops automatically
+when the editor closes or switches plugins. It is an opt-in workaround, not a
+replacement for a correct Wine graphics configuration. The
+[Host Controls parameter tab](#known-limitations) remains available if the
+native editor misbehaves. Test with RNNoise and Supertone Clear on your
+particular Wine/vstbridge setup before declaring this fixed. The bridge
 is not downloaded or installed automatically. For details, see
 [Windows VST3 bridge architecture and migration](docs/windows-vst3-bridge.md).
 

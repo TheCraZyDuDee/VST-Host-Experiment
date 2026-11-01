@@ -213,20 +213,20 @@ inline std::optional<WindowsBridgeSelection> locate_bridge() {
     // Explicit per-backend overrides take priority over automatic preference.
     if (const char* p = std::getenv("VSTBRIDGECTL"); p && *p) {
         const auto control = locate_control(WindowsBridgeBackend::Vstbridge);
-        if (!control.empty()) return WindowsBridgeSelection{WindowsBridgeBackend::Vstbridge, control, {}};
+        if (!control.empty()) return WindowsBridgeSelection{WindowsBridgeBackend::Vstbridge, control, {}, {}};
         return std::nullopt;
     }
     if (const char* p = std::getenv("YABRIDGECTL"); p && *p) {
         const auto control = locate_control(WindowsBridgeBackend::Yabridge);
-        if (!control.empty()) return WindowsBridgeSelection{WindowsBridgeBackend::Yabridge, control, {}};
+        if (!control.empty()) return WindowsBridgeSelection{WindowsBridgeBackend::Yabridge, control, {}, {}};
         return std::nullopt;
     }
     const auto vstbridge = locate_control(WindowsBridgeBackend::Vstbridge);
     if (!vstbridge.empty())
-        return WindowsBridgeSelection{WindowsBridgeBackend::Vstbridge, vstbridge, {}};
+        return WindowsBridgeSelection{WindowsBridgeBackend::Vstbridge, vstbridge, {}, {}};
     const auto yabridge = locate_control(WindowsBridgeBackend::Yabridge);
     if (!yabridge.empty())
-        return WindowsBridgeSelection{WindowsBridgeBackend::Yabridge, yabridge, {}};
+        return WindowsBridgeSelection{WindowsBridgeBackend::Yabridge, yabridge, {}, {}};
     return std::nullopt;
 }
 
@@ -390,7 +390,7 @@ inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& 
     const bool has_vst3 = !wrapper_directory.empty() &&
         std::filesystem::is_directory(wrapper_directory, wrapper_error) && !wrapper_error;
     wrapper_error.clear();
-    const bool has_vst2 = !vst2_directory.empty() &&
+    [[maybe_unused]] const bool has_vst2 = !vst2_directory.empty() &&
         std::filesystem::is_directory(vst2_directory, wrapper_error) && !wrapper_error;
 #if defined(VST_HOST_ENABLE_VST2)
     // Inline VST2 installation is also valid even when neither centralized

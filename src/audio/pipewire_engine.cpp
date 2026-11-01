@@ -1,6 +1,7 @@
 #include "pipewire_engine.hpp"
 
 #include "stereo_ring_buffer.hpp"
+#include "buffer_bounds.hpp"
 #include "capture_target_policy.hpp"
 #include "processor_chain.hpp"
 #include "gain_processor.hpp"
@@ -74,16 +75,19 @@ void on_capture_process(void* userdata) {
         spa_buffer->datas[0].data != nullptr &&
         spa_buffer->datas[0].chunk != nullptr) {
         const auto& data = spa_buffer->datas[0];
-        const auto sample_count = static_cast<std::size_t>(data.chunk->size) /
-                                  sizeof(float);
-        const auto frames = sample_count / channel_count;
-        const auto* samples = reinterpret_cast<const float*>(
-            static_cast<const std::uint8_t*>(data.data) + data.chunk->offset);
-        // The session manager should not relink a pinned stream, but guard
-        // against processing a different input during device disappearance.
-        if (state->selected_target_name.empty() ||
-            state->selected_target_present.load(std::memory_order_acquire))
-            state->ring.push_interleaved(samples, frames);
+        // Never interpret a malformed or truncated spa_chunk as sample data.
+        // Skip invalid capture chunks; the output underrun path generates silence.
+        if (valid_stereo_float_chunk(data.maxsize, data.chunk->offset,
+                                     data.chunk->size)) {
+            const auto frames = static_cast<std::size_t>(data.chunk->size) /
+                                frame_bytes;
+            const auto* samples = reinterpret_cast<const float*>(
+                static_cast<const std::uint8_t*>(data.data) + data.chunk->offset);
+            // A pinned source must not silently process a different input.
+            if (state->selected_target_name.empty() ||
+                state->selected_target_present.load(std::memory_order_acquire))
+                state->ring.push_interleaved(samples, frames);
+        }
     }
 
     pw_stream_queue_buffer(state->capture_stream, buffer);

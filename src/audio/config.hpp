@@ -24,6 +24,7 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
     PipeWireOptions parsed;
     std::vector<bool> component_state_seen;
     std::vector<bool> controller_state_seen;
+    std::vector<bool> bypass_seen;
     std::string line;
     std::size_t line_number = 0;
     while (std::getline(input, line)) {
@@ -38,16 +39,21 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
         const auto key_end = line.find_last_not_of(" \t", equals - 1);
         const auto key = line.substr(first, key_end - first + 1);
         std::istringstream value_stream(line.substr(equals + 1));
+        const auto value_complete = [&value_stream] {
+            value_stream >> std::ws;
+            return value_stream.eof();
+        };
         if (key == "gain") {
             float value{};
-            if (!(value_stream >> value) || !std::isfinite(value) || value < 0.0F || value > 4.0F) {
+            if (!(value_stream >> value) || !value_complete() ||
+                !std::isfinite(value) || value < 0.0F || value > 4.0F) {
                 error = "Invalid gain at line " + std::to_string(line_number);
                 return false;
             }
             parsed.gain = value;
         } else if (key == "latency_frames") {
             unsigned value{};
-            if (!(value_stream >> value) ||
+            if (!(value_stream >> value) || !value_complete() ||
                 (value != 128 && value != 256 && value != 512 && value != 1024)) {
                 error = "Invalid latency_frames at line " + std::to_string(line_number);
                 return false;
@@ -55,7 +61,8 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
             parsed.latency_frames = value;
         } else if (key == "bypass") {
             std::string value;
-            if (!(value_stream >> value) || (value != "true" && value != "false")) {
+            if (!(value_stream >> value) || !value_complete() ||
+                (value != "true" && value != "false")) {
                 error = "Invalid bypass at line " + std::to_string(line_number);
                 return false;
             }
@@ -70,7 +77,8 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
                 return false;
             }
             std::string encoded;
-            if (!(value_stream >> std::quoted(encoded))) {
+            value_stream >> std::ws;
+            if (value_stream.peek() != '"' || !(value_stream >> std::quoted(encoded))) {
                 error = "Invalid " + key + " at line " + std::to_string(line_number);
                 return false;
             }
@@ -92,7 +100,7 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
             // Optional setting for the immediately preceding plugin entry.
             // Old config files lack this key and continue to load as active.
             std::string value;
-            if (parsed.plugin_bypassed.empty() ||
+            if (parsed.plugin_bypassed.empty() || bypass_seen.back() ||
                 !(value_stream >> value) || (value != "true" && value != "false")) {
                 error = "Invalid plugin_bypassed at line " + std::to_string(line_number);
                 return false;
@@ -104,9 +112,12 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
                 return false;
             }
             parsed.plugin_bypassed.back() = value == "true";
+            bypass_seen.back() = true;
         } else if (key == "input" || key == "output_name" || key == "plugin" || key == "plugin_directory" || key == "windows_plugin_directory") {
             std::string value;
-            if (!(value_stream >> std::quoted(value)) || (value.empty() && key != "input")) {
+            value_stream >> std::ws;
+            if (value_stream.peek() != '"' || !(value_stream >> std::quoted(value)) ||
+                (value.empty() && key != "input")) {
                 error = "Expected a non-empty quoted string at line " + std::to_string(line_number);
                 return false;
             }
@@ -122,6 +133,7 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
             } else if (key == "plugin") {
                 parsed.plugin_paths.push_back(value);
                 parsed.plugin_bypassed.push_back(false);
+                bypass_seen.push_back(false);
                 parsed.plugin_states.emplace_back();
                 component_state_seen.push_back(false);
                 controller_state_seen.push_back(false);

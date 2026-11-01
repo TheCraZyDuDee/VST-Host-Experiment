@@ -1,4 +1,5 @@
 #include "vst3_processor.hpp"
+#include "parameter_event_queue.hpp"
 
 #include <utility>
 #include <cstdio>
@@ -9,6 +10,7 @@
 #include "public.sdk/source/common/memorystream.h"
 #include "public.sdk/source/vst/hosting/module.h"
 #include "public.sdk/source/vst/hosting/plugprovider.h"
+#include "public.sdk/source/vst/hosting/parameterchanges.h"
 #include "pluginterfaces/base/funknown.h"
 #include "pluginterfaces/vst/ivstaudioprocessor.h"
 #include "pluginterfaces/vst/ivstcomponent.h"
@@ -19,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <cmath>
 #include <memory>
 #include <vector>
 #include <cstdint>
@@ -31,20 +34,38 @@ namespace {
 
 class EditorComponentHandler final : public Steinberg::Vst::IComponentHandler {
 public:
-    explicit EditorComponentHandler(Steinberg::Vst::IEditController* controller)
-        : controller_(controller) {}
+    EditorComponentHandler(Steinberg::Vst::IEditController* controller,
+                           vst_host::audio::ParameterEventQueue& pending)
+        : controller_(controller), pending_(pending) {}
 
     Steinberg::tresult PLUGIN_API beginEdit(Steinberg::Vst::ParamID) override {
         return Steinberg::kResultOk;
     }
     Steinberg::tresult PLUGIN_API performEdit(Steinberg::Vst::ParamID id,
                                                Steinberg::Vst::ParamValue value) override {
-        return controller_ ? controller_->setParamNormalized(id, value) : Steinberg::kResultFalse;
+        if (!controller_) return Steinberg::kResultFalse;
+        // Editor and DSP may be separate objects/processes (notably yabridge).
+        // Updating the controller alone does not update the audio processor.
+        // Some plug-ins have already updated their controller before calling
+        // performEdit and may return false for a redundant set. The host must
+        // nevertheless deliver the explicit edit to the DSP.
+        (void)controller_->setParamNormalized(id, value);
+        (void)pending_.push(id, value); // bounded; never waits on audio thread
+        return Steinberg::kResultOk;
     }
     Steinberg::tresult PLUGIN_API endEdit(Steinberg::Vst::ParamID) override {
         return Steinberg::kResultOk;
     }
-    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32) override {
+    Steinberg::tresult PLUGIN_API restartComponent(Steinberg::int32 flags) override {
+        if (controller_ && (flags & Steinberg::Vst::kParamValuesChanged) != 0) {
+            // Preset/patch changes often update numerous parameters without
+            // issuing performEdit for every value. Transfer them to DSP too.
+            Steinberg::Vst::ParameterInfo info{};
+            for (Steinberg::int32 index = 0; index < controller_->getParameterCount(); ++index) {
+                if (controller_->getParameterInfo(index, info) == Steinberg::kResultOk)
+                    (void)pending_.push(info.id, controller_->getParamNormalized(info.id));
+            }
+        }
         return Steinberg::kResultOk;
     }
 
@@ -65,6 +86,7 @@ public:
 
 private:
     Steinberg::Vst::IEditController* controller_{};
+    vst_host::audio::ParameterEventQueue& pending_;
 };
 
 class EditorFrame final : public Steinberg::IPlugFrame {
@@ -112,6 +134,8 @@ struct Vst3Processor::Impl {
     Steinberg::IPtr<Steinberg::Vst::IEditController> editor_controller;
     Steinberg::IPtr<Steinberg::IPlugView> editor_view;
     std::unique_ptr<EditorComponentHandler> editor_handler;
+    ParameterEventQueue pending_parameter_changes;
+    std::unique_ptr<Steinberg::Vst::ParameterChanges> input_parameter_changes;
     std::unique_ptr<EditorFrame> editor_frame;
     Steinberg::Vst::AudioBusBuffers input_bus{};
     Steinberg::Vst::AudioBusBuffers output_bus{};
@@ -248,7 +272,8 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
         error = "The VST3 plug-in does not provide an edit controller.";
         return false;
     }
-    impl_->editor_handler = std::make_unique<EditorComponentHandler>(impl_->editor_controller.get());
+    impl_->editor_handler = std::make_unique<EditorComponentHandler>(
+        impl_->editor_controller.get(), impl_->pending_parameter_changes);
     impl_->editor_controller->setComponentHandler(impl_->editor_handler.get());
     std::fprintf(stderr, "[VST3 editor] Edit controller acquired; parameter count=%d.\n",
                  impl_->editor_controller->getParameterCount());
@@ -352,9 +377,63 @@ bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
         close_editor();
         return false;
     }
+    // The host has sized the X11 socket; explicitly tell the plug-in its
+    // attached view's dimensions. Some Wine/yabridge editors use this event to
+    // synchronize their native window geometry, including mouse coordinates.
+    // This is best-effort: some VST3 views do not implement onSize().
+    const auto on_size_result = impl_->editor_view->onSize(&size);
+    if (on_size_result != Steinberg::kResultOk) {
+        std::fprintf(stderr, "[VST3 editor] onSize after attach returned %d.\n",
+                     static_cast<int>(on_size_result));
+    }
     std::fprintf(stderr, "[VST3 editor] Host attachment succeeded; requested view size=%dx%d.\n",
                  width, height);
     return true;
+#endif
+}
+
+std::vector<Vst3Processor::ParameterInfo> Vst3Processor::editor_parameters() const {
+    std::vector<ParameterInfo> result;
+#if defined(VST_HOST_ENABLE_VST3)
+    if (!impl_ || !impl_->editor_controller) return result;
+    auto* controller = impl_->editor_controller.get();
+    const auto count = controller->getParameterCount();
+    // A bound prevents a malfunctioning bridge/controller from populating
+    // unbounded amounts of native Qt widgets.
+    result.reserve(static_cast<std::size_t>(std::clamp(count, Steinberg::int32{0},
+                                                        Steinberg::int32{512})));
+    for (Steinberg::int32 i = 0; i < count && i < 512; ++i) {
+        Steinberg::Vst::ParameterInfo native{};
+        if (controller->getParameterInfo(i, native) != Steinberg::kResultOk)
+            continue;
+        ParameterInfo param;
+        param.id = native.id;
+        for (const auto ch : native.title) {
+            if (ch == 0) break;
+            param.name.push_back(static_cast<char16_t>(ch));
+        }
+        param.step_count = native.stepCount;
+        param.read_only = (native.flags & Steinberg::Vst::ParameterInfo::kIsReadOnly) != 0;
+        param.normalized_value = controller->getParamNormalized(native.id);
+        result.push_back(std::move(param));
+    }
+#endif
+    return result;
+}
+
+bool Vst3Processor::set_editor_parameter(std::uint32_t id, double normalized_value) {
+#if !defined(VST_HOST_ENABLE_VST3)
+    (void)id;
+    (void)normalized_value;
+    return false;
+#else
+    if (!impl_ || !impl_->editor_controller || !std::isfinite(normalized_value) ||
+        normalized_value < 0.0 || normalized_value > 1.0) return false;
+
+    // Called only on the UI thread. Updating the controller is not sufficient
+    // for DSP, so always submit the value to the audio callback as well.
+    (void)impl_->editor_controller->setParamNormalized(id, normalized_value);
+    return impl_->pending_parameter_changes.push(id, normalized_value);
 #endif
 }
 
@@ -521,6 +600,12 @@ bool Vst3Processor::prepare(const AudioProcessSpec& spec) {
     impl_->process_data.inputs = &impl_->input_bus;
     impl_->process_data.outputs = &impl_->output_bus;
     impl_->process_data.processContext = &impl_->process_context;
+    // Reserve all parameter queues and their point storage before audio starts.
+    // The RT thread consumes a bounded number of UI changes per audio block.
+    constexpr Steinberg::int32 max_parameter_changes_per_block = 64;
+    impl_->input_parameter_changes = std::make_unique<Steinberg::Vst::ParameterChanges>(
+        max_parameter_changes_per_block);
+    impl_->process_data.inputParameterChanges = impl_->input_parameter_changes.get();
 
     const auto active_result = impl_->component->setActive(true);
     if (active_result != Steinberg::kResultOk) {
@@ -570,6 +655,16 @@ void Vst3Processor::process(float* samples, std::size_t frames) noexcept {
                 ? impl_->input_left[i] : impl_->input_right[i];
         }
 
+        impl_->input_parameter_changes->clearQueue();
+        ParameterEventQueue::Event event{};
+        for (Steinberg::int32 n = 0; n < 64 && impl_->pending_parameter_changes.pop(event); ++n) {
+            Steinberg::int32 index = 0;
+            auto* queue = impl_->input_parameter_changes->addParameterData(event.id, index);
+            if (queue != nullptr) {
+                Steinberg::int32 point_index = 0;
+                (void)queue->addPoint(0, event.normalized_value, point_index);
+            }
+        }
         impl_->process_data.numSamples = static_cast<Steinberg::int32>(block_frames);
         impl_->process_context.projectTimeSamples = impl_->project_time_samples;
         const auto result = impl_->processor->process(impl_->process_data);

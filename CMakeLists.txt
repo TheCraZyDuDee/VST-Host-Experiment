@@ -124,6 +124,11 @@ if(BUILD_TESTING)
     target_compile_features(ring-buffer-test PRIVATE cxx_std_20)
     add_test(NAME ring-buffer-test COMMAND ring-buffer-test)
 
+    add_executable(parameter-event-queue-test tests/parameter_event_queue_test.cpp)
+    target_include_directories(parameter-event-queue-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(parameter-event-queue-test PRIVATE cxx_std_20)
+    add_test(NAME parameter-event-queue-test COMMAND parameter-event-queue-test)
+
     add_executable(audio-processor-test tests/audio_processor_test.cpp src/audio/gain_processor.cpp)
     target_include_directories(audio-processor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(audio-processor-test PRIVATE cxx_std_20)
@@ -158,7 +163,7 @@ if(BUILD_TESTING)
     # many existing tests use assert() for both setup and verification.
     if(NOT MSVC)
         foreach(test_target IN ITEMS
-                ring-buffer-test audio-processor-test config-test
+                ring-buffer-test parameter-event-queue-test audio-processor-test config-test
                 plugin-discovery-test yabridge-manager-test processor-chain-test
                 vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)

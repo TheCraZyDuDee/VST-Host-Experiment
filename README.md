@@ -176,6 +176,20 @@ licensed SDK headers. If you encountered this issue, pull the latest
 PR #21 branch and rebuild the `vst2-processor-test` target before
 attempting the full GUI build.
 
+**Windows directory scope:** vstbridge/yabridge keep a global registry
+of plugin directories shared with other hosts. Running their `sync` command
+can refresh wrappers for that entire registry, regardless of the folder you
+selected in this application. The available-plugin browser and the headless
+directory loader now inspect the wrapper's original Windows module symlink
+and list/load only plugins located under the Windows directories configured
+inside VST Host Experiment. For example, selecting `Windows/VST2` does not
+list `Windows/VST3` or the sibling `Windows/VST2-Other` directory.
+Selecting the common parent lists both subdirectories recursively.
+Explicitly added plugins and existing active-chain entries remain available
+regardless of these discovery filters. No external bridge registrations or
+wrapper files are deleted. A wrapper without a resolvable original Windows
+source is omitted from automatic Windows discovery.
+
 When VST2 is enabled, **Add VST2 .so…** picks a native Linux VST2 library;
 scanning a Linux plugin directory also finds `.so` effects while excluding
 `.so` files inside VST3 bundles. Add a Windows VST2 `.dll` directory via
@@ -184,9 +198,15 @@ in the same library as the VST3 bundles. Centralized and inline VST2 bridge
 wrappers are supported. Load the generated `.so`, not the Windows `.dll`,
 into the host chain. The headless CLI also supports `--plugin /path/plugin.so`.
 
-The VST2 adapter handles 32-bit floating-point replacing effects with mono
-or stereo inputs/outputs, a basic embedded editor through X11 and
-host-parameter sliders. Editor behavior depends on the plugin and Wine
+The VST2 adapter handles 32-bit floating-point replacing effects with
+1–64 input channels and 1–64 output channels, mapped into the host's stereo
+microphone stream. The first input pair receives the microphone, additional
+inputs (such as ReaComp/ReaGate external sidechains) receive silence, and
+the first output pair is routed to the virtual mic. Extra outputs are ignored.
+This allows stereo effects exposing optional auxiliary buses to load without
+supporting arbitrary multichannel audio routing. It also offers a basic
+embedded editor through X11 and host-parameter sliders. Editor behavior
+depends on the plugin and Wine
 bridge; classic VST2 plugins may require periodic `effEditIdle` callbacks.
 Plugin state is saved using VST2 bank chunks when supported, otherwise
 a bounded parameter snapshot. Saved states follow each plugin instance

@@ -77,6 +77,11 @@ jobs:
           set -e
           cat "$RUNNER_TEMP/vst-host-wayland.log"
           test "$exit_code" -eq 124
+          # The Plug-in UI tab must be accessible on Wayland even without
+          # X11 support; the external-window action stays disabled until
+          # a compatible plugin editor is actually opened.
+          QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=vst-host-ci \
+            ./build-wayland-no-x11/vst-host-gui --check-plugin-ui-tab
       - name: Smoke-test XEmbed companion window from native Qt Wayland
         shell: bash
         run: |
@@ -105,4 +110,6 @@ jobs:
           # Third-party Wine/VST editor rendering still needs real desktop tests.
           QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=vst-host-xembed-ci DISPLAY=:83 \
             ./build-gui/vst-host-gui --check-xembed-window
+          QT_QPA_PLATFORM=wayland WAYLAND_DISPLAY=vst-host-xembed-ci DISPLAY=:83 \
+            ./build-gui/vst-host-gui --check-plugin-ui-tab
 

@@ -574,6 +574,7 @@ private:
 
 struct PluginScanResult {
     std::vector<std::pair<std::string, bool>> plugins;
+    std::size_t duplicate_aliases{};
     std::string warning;
     std::optional<vst_host::audio::WindowsBridgeSelection> bridge;
 };
@@ -1098,6 +1099,12 @@ private:
                             result.plugins.emplace_back(std::move(path), true);
                     }
                 }
+                // Both vstbridge and yabridge can mirror the same Windows
+                // module under multiple relative paths when overlapping
+                // directories were registered. The GUI's previous path-only
+                // QSet check did not detect these aliases.
+                result.plugins = vst_host::audio::deduplicate_vst3_browser_entries(
+                    result.plugins, &result.duplicate_aliases);
                 return result;
             });
     }
@@ -1395,6 +1402,10 @@ private:
             if (migratedEntries > 0) {
                 summary += tr(" Migrated %1 saved effect path(s) to the selected bridge.")
                     .arg(migratedEntries);
+            }
+            if (result.duplicate_aliases > 0) {
+                summary += tr(" Hidden %1 duplicate wrapper/browser alias(es).")
+                    .arg(result.duplicate_aliases);
             }
             if (!result.warning.empty())
                 summary += QStringLiteral("\n") + QString::fromStdString(result.warning);

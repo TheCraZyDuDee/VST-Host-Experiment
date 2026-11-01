@@ -101,6 +101,40 @@ see [Windows bridge duplicate-wrapper troubleshooting](docs/windows-vst3-bridge.
 Start with `vstbridgectl list`; only use `rm` and `sync --prune` after
 checking the effects on other hosts.
 
+## Pinned microphone and hot-plug recovery
+
+Selecting a specific microphone by its stable PipeWire **node name** now
+pins the capture stream to **that device only**. Unlike the **Default
+microphone** option, a selected input must not silently fall back to another
+microphone when it is unplugged, suspended or temporarily unavailable.
+
+On WirePlumber 0.5, the host sets `target.object`, `node.dont-fallback=true`,
+`node.linger=true`, and `node.dont-move=true` on the PipeWire **capture
+stream**. The `linger` property keeps its stream alive while the target is
+missing; `dont-fallback` prevents WirePlumber from linking a different source.
+The host also watches PipeWire source node registration by stable `node.name`
+(the numeric object ID normally changes on reconnect). While missing or paused,
+the **virtual microphone remains present but emits silence**, including when
+plugins could otherwise produce audio from silence. Queued pre-disconnect audio
+is discarded, and processing resumes automatically when the same node appears
+again. The GUI reports when it is waiting and when the source has returned.
+
+The **Default microphone** choice intentionally retains PipeWire's normal
+fallback behavior. The input target cannot be changed during a running session;
+stop and restart audio to select another source.
+
+To test, select a USB microphone, start the virtual mic, unplug it while
+another physical microphone is available, and confirm that the virtual mic is
+silent and its node remains present. Reconnect the selected microphone and
+confirm that audio resumes without restarting the host. A stable `node.name`
+must be used for automatic reconnection; numeric PipeWire node IDs are not
+persistent across unplug/replug.
+
+This behavior depends on a WirePlumber linking policy that honors
+`node.linger` (for example WirePlumber 0.5). Other PipeWire session managers
+or outdated WirePlumber configurations may behave differently and require
+separate testing.
+
 ## Live per-effect bypass
 
 Select an effect in the **Processing chain** and check **Bypass selected

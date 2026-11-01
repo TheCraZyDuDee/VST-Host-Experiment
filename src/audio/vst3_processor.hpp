@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audio_processor.hpp"
+#include "plugin_state.hpp"
 
 #include <memory>
 #include <string>
@@ -20,6 +21,10 @@ public:
     Vst3Processor& operator=(const Vst3Processor&) = delete;
 
     bool load(std::string& error);
+    // Restore after load(), before prepare(). Snapshot only AFTER PipeWire
+    // callbacks have stopped and the native editor has been detached.
+    bool restore_plugin_state(const PluginState& state, std::string& error);
+    bool snapshot_plugin_state(PluginState& state, std::string& error);
     bool open_editor(void* native_parent, int& width, int& height, std::string& error);
     void close_editor() noexcept;
 

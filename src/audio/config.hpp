@@ -22,6 +22,8 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
     }
 
     PipeWireOptions parsed;
+    std::vector<bool> component_state_seen;
+    std::vector<bool> controller_state_seen;
     std::string line;
     std::size_t line_number = 0;
     while (std::getline(input, line)) {
@@ -58,6 +60,34 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
                 return false;
             }
             parsed.bypass = value == "true";
+        } else if (key == "plugin_component_state" ||
+                   key == "plugin_controller_state") {
+            const bool component = key == "plugin_component_state";
+            auto& seen = component ? component_state_seen : controller_state_seen;
+            if (parsed.plugin_states.empty() || seen.back()) {
+                error = "Unexpected or repeated " + key + " at line " +
+                        std::to_string(line_number);
+                return false;
+            }
+            std::string encoded;
+            if (!(value_stream >> std::quoted(encoded))) {
+                error = "Invalid " + key + " at line " + std::to_string(line_number);
+                return false;
+            }
+            value_stream >> std::ws;
+            if (!value_stream.eof()) {
+                error = "Unexpected data after " + key + " at line " +
+                        std::to_string(line_number);
+                return false;
+            }
+            auto& bytes = component ? parsed.plugin_states.back().component
+                                    : parsed.plugin_states.back().controller;
+            if (!base64_decode(encoded, bytes)) {
+                error = "Invalid or oversized base64 for " + key + " at line " +
+                        std::to_string(line_number);
+                return false;
+            }
+            seen.back() = true;
         } else if (key == "plugin_bypassed") {
             // Optional setting for the immediately preceding plugin entry.
             // Old config files lack this key and continue to load as active.
@@ -92,6 +122,9 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
             } else if (key == "plugin") {
                 parsed.plugin_paths.push_back(value);
                 parsed.plugin_bypassed.push_back(false);
+                parsed.plugin_states.emplace_back();
+                component_state_seen.push_back(false);
+                controller_state_seen.push_back(false);
             } else if (key == "plugin_directory") parsed.plugin_directories.push_back(value);
             else parsed.windows_plugin_directories.push_back(value);
         } else {
@@ -110,6 +143,17 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
 
 inline bool save_config(const std::filesystem::path& path, const PipeWireOptions& options,
                         std::string& error) {
+    if (options.plugin_states.size() > options.plugin_paths.size()) {
+        error = "Plugin state count exceeds processing-chain size.";
+        return false;
+    }
+    for (const auto& state : options.plugin_states) {
+        if (state.component.size() > max_plugin_state_bytes ||
+            state.controller.size() > max_plugin_state_bytes) {
+            error = "Plugin state exceeds the 16 MiB per-part safety limit.";
+            return false;
+        }
+    }
     const auto temporary = path.string() + ".tmp";
     {
         std::ofstream output(temporary, std::ios::trunc);
@@ -127,6 +171,15 @@ inline bool save_config(const std::filesystem::path& path, const PipeWireOptions
             output << "plugin = " << std::quoted(options.plugin_paths[index]) << '\n';
             if (index < options.plugin_bypassed.size() && options.plugin_bypassed[index])
                 output << "plugin_bypassed = true\n";
+            if (index < options.plugin_states.size()) {
+                const auto& state = options.plugin_states[index];
+                if (!state.component.empty())
+                    output << "plugin_component_state = "
+                           << std::quoted(base64_encode(state.component)) << '\n';
+                if (!state.controller.empty())
+                    output << "plugin_controller_state = "
+                           << std::quoted(base64_encode(state.controller)) << '\n';
+            }
         }
         for (const auto& directory : options.plugin_directories)
             output << "plugin_directory = " << std::quoted(directory) << '\n';

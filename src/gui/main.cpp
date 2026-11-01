@@ -6,6 +6,7 @@
 #include "audio/vst3_processor.hpp"
 
 #include <QApplication>
+#include <QByteArray>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -53,6 +54,7 @@
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <cmath>
 #include <vector>
 #include <utility>
@@ -639,6 +641,19 @@ public:
             tr("Bypass selected effect (can change while audio runs)"), central);
         bypassSelectedEffect_->setEnabled(false);
         root->addWidget(bypassSelectedEffect_);
+        clearSavedStateButton_ = new QPushButton(
+            tr("Clear saved settings for selected effect"), central);
+        clearSavedStateButton_->setEnabled(false);
+        root->addWidget(clearSavedStateButton_);
+        connect(clearSavedStateButton_, &QPushButton::clicked, this, [this] {
+            if (engine_ || chainList_->currentRow() < 0) return;
+            auto* item = chainList_->currentItem();
+            item->setData(Qt::UserRole + 3, QByteArray());
+            item->setData(Qt::UserRole + 4, QByteArray());
+            updateSelectedPlugin();
+            saveSettings();
+            status_->setText(tr("Saved plugin settings cleared. The effect will start with its defaults."));
+        });
         connect(bypassSelectedEffect_, &QCheckBox::toggled, this,
                 [this](bool bypassed) {
                     const int row = chainList_->currentRow();
@@ -661,12 +676,14 @@ public:
 
         auto* configActions = new QHBoxLayout();
         loadConfigButton_ = new QPushButton(tr("Load configuration…"), central);
-        auto* saveConfigButton = new QPushButton(tr("Save configuration…"), central);
+        saveConfigButton_ = new QPushButton(tr("Save configuration…"), central);
+        saveConfigButton_->setToolTip(tr(
+            "Stop audio to capture the latest VST3 plugin state before saving a portable configuration."));
         configActions->addWidget(loadConfigButton_);
-        configActions->addWidget(saveConfigButton);
+        configActions->addWidget(saveConfigButton_);
         root->addLayout(configActions);
         connect(loadConfigButton_, &QPushButton::clicked, this, [this] { loadConfiguration(); });
-        connect(saveConfigButton, &QPushButton::clicked, this, [this] { saveConfiguration(); });
+        connect(saveConfigButton_, &QPushButton::clicked, this, [this] { saveConfiguration(); });
 
         root->addWidget(new QLabel(tr("Plugin search directories (Linux and Wine)"), central));
         pluginDirectories_ = new QListWidget(central);
@@ -835,6 +852,51 @@ protected:
     }
 
 private:
+    static vst_host::audio::PluginState storedPluginState(const QListWidgetItem* item) {
+        vst_host::audio::PluginState result;
+        if (!item) return result;
+        const auto component = item->data(Qt::UserRole + 3).toByteArray();
+        const auto controller = item->data(Qt::UserRole + 4).toByteArray();
+        if (static_cast<std::size_t>(component.size()) > vst_host::audio::max_plugin_state_bytes ||
+            static_cast<std::size_t>(controller.size()) > vst_host::audio::max_plugin_state_bytes)
+            return result;
+        result.component.resize(static_cast<std::size_t>(component.size()));
+        result.controller.resize(static_cast<std::size_t>(controller.size()));
+        if (!component.isEmpty())
+            std::memcpy(result.component.data(), component.constData(),
+                        static_cast<std::size_t>(component.size()));
+        if (!controller.isEmpty())
+            std::memcpy(result.controller.data(), controller.constData(),
+                        static_cast<std::size_t>(controller.size()));
+        return result;
+    }
+
+    static void storePluginState(QListWidgetItem* item,
+                                 const vst_host::audio::PluginState& state) {
+        if (!item) return;
+        if (state.component.size() > vst_host::audio::max_plugin_state_bytes ||
+            state.controller.size() > vst_host::audio::max_plugin_state_bytes) return;
+        item->setData(Qt::UserRole + 3,
+            QByteArray(reinterpret_cast<const char*>(state.component.data()),
+                       static_cast<qsizetype>(state.component.size())));
+        item->setData(Qt::UserRole + 4,
+            QByteArray(reinterpret_cast<const char*>(state.controller.data()),
+                       static_cast<qsizetype>(state.controller.size())));
+    }
+
+    QString captureFinishedPluginStates() {
+        if (!engine_) return {};
+        const auto snapshots = engine_->saved_plugin_states();
+        for (std::size_t i = 0; i < snapshots.size() &&
+             i < static_cast<std::size_t>(chainList_->count()); ++i) {
+            // A plugin that refuses getState should not discard a valid
+            // previously loaded snapshot; keep it for troubleshooting.
+            if (!snapshots[i].empty())
+                storePluginState(chainList_->item(static_cast<int>(i)), snapshots[i]);
+        }
+        return QString::fromStdString(engine_->plugin_state_warning()).trimmed();
+    }
+
     static QString displayPluginName(const QString& path, bool wine) {
         const QFileInfo info(path);
         QString name = info.completeBaseName();
@@ -895,6 +957,8 @@ private:
         item->setData(Qt::UserRole, path);
         item->setData(Qt::UserRole + 1, wine);
         item->setData(Qt::UserRole + 2, bypassed);
+        item->setData(Qt::UserRole + 3, QByteArray());
+        item->setData(Qt::UserRole + 4, QByteArray());
         item->setToolTip(path);
         updateChainLabels();
     }
@@ -918,6 +982,8 @@ private:
         removeDirectoryButton_->setEnabled(enabled);
         scanDirectoriesButton_->setEnabled(enabled);
         loadConfigButton_->setEnabled(enabled);
+        saveConfigButton_->setEnabled(enabled);
+        clearSavedStateButton_->setEnabled(enabled && chainList_->currentRow() >= 0);
         // Routing/gain/latency are startup-only controls. Keep the selected
         // node name fixed for the running session; only live per-effect bypass
         // can change without a restart.
@@ -935,10 +1001,17 @@ private:
         const auto paths = settings.value(QStringLiteral("pluginChain")).toStringList();
         const auto kinds = settings.value(QStringLiteral("pluginChainWine")).toList();
         const auto bypasses = settings.value(QStringLiteral("pluginChainBypassed")).toList();
+        const auto componentStates = settings.value(QStringLiteral("pluginComponentStates")).toList();
+        const auto controllerStates = settings.value(QStringLiteral("pluginControllerStates")).toList();
         for (int i = 0; i < paths.size(); ++i) {
             addChainPlugin(paths[i], i < kinds.size()
                 ? kinds[i].toBool() : appearsToBeWineWrapper(paths[i]),
                 i < bypasses.size() && bypasses[i].toBool());
+            auto* item = chainList_->item(i);
+            if (i < componentStates.size())
+                item->setData(Qt::UserRole + 3, componentStates[i].toByteArray());
+            if (i < controllerStates.size())
+                item->setData(Qt::UserRole + 4, controllerStates[i].toByteArray());
         }
         manualPlugins_ = settings.value(QStringLiteral("individualPluginBundles")).toStringList();
         const auto directories = settings.value(QStringLiteral("pluginDirectories")).toStringList();
@@ -964,15 +1037,21 @@ private:
         QStringList paths;
         QVariantList kinds;
         QVariantList bypasses;
+        QVariantList componentStates;
+        QVariantList controllerStates;
         for (int i = 0; i < chainList_->count(); ++i) {
             const auto* item = chainList_->item(i);
             paths.push_back(item->data(Qt::UserRole).toString());
             kinds.push_back(item->data(Qt::UserRole + 1).toBool());
             bypasses.push_back(item->data(Qt::UserRole + 2).toBool());
+            componentStates.push_back(item->data(Qt::UserRole + 3).toByteArray());
+            controllerStates.push_back(item->data(Qt::UserRole + 4).toByteArray());
         }
         settings.setValue(QStringLiteral("pluginChain"), paths);
         settings.setValue(QStringLiteral("pluginChainWine"), kinds);
         settings.setValue(QStringLiteral("pluginChainBypassed"), bypasses);
+        settings.setValue(QStringLiteral("pluginComponentStates"), componentStates);
+        settings.setValue(QStringLiteral("pluginControllerStates"), controllerStates);
         settings.setValue(QStringLiteral("individualPluginBundles"), manualPlugins_);
         QStringList directories;
         QStringList windowsDirectories;
@@ -998,6 +1077,7 @@ private:
             const auto* item = chainList_->item(i);
             options.plugin_paths.push_back(item->data(Qt::UserRole).toString().toStdString());
             options.plugin_bypassed.push_back(item->data(Qt::UserRole + 2).toBool());
+            options.plugin_states.push_back(storedPluginState(item));
         }
         for (int i = 0; i < pluginDirectories_->count(); ++i) {
             const auto* item = pluginDirectories_->item(i);
@@ -1020,6 +1100,9 @@ private:
             const auto qpath = QString::fromStdString(options.plugin_paths[index]);
             addChainPlugin(qpath, appearsToBeWineWrapper(qpath),
                 index < options.plugin_bypassed.size() && options.plugin_bypassed[index]);
+            if (index < options.plugin_states.size())
+                storePluginState(chainList_->item(static_cast<int>(index)),
+                                 options.plugin_states[index]);
         }
         pluginDirectories_->clear();
         for (const auto& directory : options.plugin_directories)
@@ -1140,6 +1223,12 @@ private:
     }
 
     void saveConfiguration() {
+        if (engine_) {
+            QMessageBox::information(this, tr("Stop audio before saving"),
+                tr("Stop the audio engine first so the host can safely capture "
+                   "the current state of every VST3 effect."));
+            return;
+        }
         const auto path = QFileDialog::getSaveFileName(
             this, tr("Save host configuration"), QStringLiteral("vst-host.vsthost"),
             tr("VST Host configuration (*.vsthost)"));
@@ -1206,12 +1295,16 @@ private:
         closeEditorDialog();
         if (engine_) engine_->request_stop();
         if (worker_.joinable()) worker_.join();
+        const auto stateWarning = captureFinishedPluginStates();
         engine_.reset();
         startButton_->setEnabled(true);
         stopButton_->setEnabled(false);
         setEditingEnabled(true);
         editorButton_->setEnabled(false);
-        status_->setText(tr("Audio engine stopped."));
+        status_->setText(stateWarning.isEmpty()
+            ? tr("Audio engine stopped. Plugin settings saved.")
+            : tr("Audio stopped. Some plugin settings could not be saved: %1")
+                .arg(stateWarning));
         activeInputTarget_.clear();
         selectedInputAvailable_ = true;
         updateSelectedPlugin();
@@ -1230,10 +1323,14 @@ private:
     void updateSelectedPlugin() {
         const auto* item = chainList_->currentItem();
         selectedPluginLabel_->setText(item
-            ? tr("Selected: %1 — double-click to edit while running")
+            ? tr("Selected: %1%2 — double-click to edit while running")
                 .arg(QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName() +
                      (item->data(Qt::UserRole + 1).toBool() ? tr(" (WINE)") : QString()))
+                .arg(item->data(Qt::UserRole + 3).toByteArray().isEmpty() &&
+                     item->data(Qt::UserRole + 4).toByteArray().isEmpty()
+                         ? QString() : tr(" [saved settings]"))
             : tr("No effect selected"));
+        clearSavedStateButton_->setEnabled(item && !engine_);
         {
             QSignalBlocker blocker(bypassSelectedEffect_);
             bypassSelectedEffect_->setEnabled(item != nullptr);
@@ -1433,16 +1530,20 @@ private:
             const auto engineError = engine_->last_error();
             closeEditorDialog();
             if (worker_.joinable()) worker_.join();
+            const auto stateWarning = captureFinishedPluginStates();
             engine_.reset();
             startButton_->setEnabled(true);
             stopButton_->setEnabled(false);
             editorButton_->setEnabled(false);
             setEditingEnabled(true);
-            status_->setText(!engineError.empty()
-                                 ? QString::fromStdString(engineError)
-                                 : (engineResult_ == 0
-                                        ? tr("Audio engine stopped.")
-                                        : tr("Audio engine exited with an error. See the terminal output for details.")));
+            QString message = !engineError.empty()
+                ? QString::fromStdString(engineError)
+                : (engineResult_ == 0 ? tr("Audio engine stopped.")
+                    : tr("Audio engine exited with an error. See terminal output."));
+            if (!stateWarning.isEmpty())
+                message += tr(" Plugin state warning: %1").arg(stateWarning);
+            status_->setText(message);
+            saveSettings();
             return;
         }
         const auto stats = engine_->diagnostics();
@@ -1509,6 +1610,8 @@ private:
     QPushButton* removeDirectoryButton_{};
     QPushButton* scanDirectoriesButton_{};
     QPushButton* loadConfigButton_{};
+    QPushButton* saveConfigButton_{};
+    QPushButton* clearSavedStateButton_{};
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};
     QPushButton* moveDownButton_{};

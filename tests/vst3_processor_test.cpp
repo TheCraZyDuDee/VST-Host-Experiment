@@ -19,6 +19,15 @@ int main() {
     assert(!processor.set_editor_parameter(123, -0.1));
     assert(!processor.set_editor_parameter(123, 1.1));
 
+    vst_host::audio::PluginState snapshot;
+    std::string state_error;
+    assert(!processor.snapshot_plugin_state(snapshot, state_error));
+    assert(!state_error.empty());
+    state_error.clear();
+    snapshot.component = {1, 2, 3};
+    assert(!processor.restore_plugin_state(snapshot, state_error));
+    assert(!state_error.empty());
+
 
     float samples[] = {0.25F, -0.5F, 0.75F, -1.0F};
     processor.process(samples, 2);

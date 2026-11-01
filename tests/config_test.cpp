@@ -15,6 +15,10 @@ int main() {
     source.bypass = true;
     source.plugin_paths = {"/plugins/First Effect.vst3", "/plugins/Second.vst3"};
     source.plugin_bypassed = {false, true};
+    source.plugin_states.resize(2);
+    source.plugin_states[0].component = {0, 255, 1, 2, 3, 4};
+    source.plugin_states[0].controller = {'a', 'b', 0, 'c'};
+    source.plugin_states[1].component = {8, 7, 6};
     source.plugin_directories = {"/plugins/effects", "/home/user/custom-vst3"};
     source.windows_plugin_directories = {"/home/user/.wine/drive_c/Program Files/Common Files/VST3"};
 
@@ -29,6 +33,11 @@ int main() {
     assert(restored.bypass == source.bypass);
     assert(restored.plugin_paths == source.plugin_paths);
     assert(restored.plugin_bypassed == source.plugin_bypassed);
+    assert(restored.plugin_states.size() == 2);
+    for (std::size_t i = 0; i < 2; ++i) {
+        assert(restored.plugin_states[i].component == source.plugin_states[i].component);
+        assert(restored.plugin_states[i].controller == source.plugin_states[i].controller);
+    }
     assert(restored.plugin_directories == source.plugin_directories);
     assert(restored.windows_plugin_directories == source.windows_plugin_directories);
 
@@ -43,15 +52,37 @@ int main() {
     // Old configuration files omit plugin_bypassed. Every plugin should
     // start enabled even if a previous load reused the options object.
     source.plugin_bypassed.clear();
+    source.plugin_states.clear();
     assert(vst_host::audio::save_config(path, source, error));
     assert(vst_host::audio::load_config(path, restored, error));
     assert(restored.plugin_bypassed.size() == 2 &&
            !restored.plugin_bypassed[0] && !restored.plugin_bypassed[1]);
+    assert(restored.plugin_states.size() == 2 &&
+           restored.plugin_states[0].empty() && restored.plugin_states[1].empty());
 
     // The bypass key cannot appear before its corresponding plugin.
     {
         std::ofstream bad(path, std::ios::trunc);
         bad << "plugin_bypassed = true\n";
+    }
+    assert(!vst_host::audio::load_config(path, restored, error));
+
+    {
+        std::ofstream bad(path, std::ios::trunc);
+        bad << "plugin = \"effect.vst3\"\n"
+               "plugin_component_state = \"not-valid-base64\"\n";
+    }
+    assert(!vst_host::audio::load_config(path, restored, error));
+    {
+        std::ofstream bad(path, std::ios::trunc);
+        bad << "plugin_controller_state = \"Zg==\"\n";
+    }
+    assert(!vst_host::audio::load_config(path, restored, error));
+    {
+        std::ofstream bad(path, std::ios::trunc);
+        bad << "plugin = \"effect.vst3\"\n"
+               "plugin_component_state = \"Zg==\"\n"
+               "plugin_component_state = \"Zg==\"\n";
     }
     assert(!vst_host::audio::load_config(path, restored, error));
 

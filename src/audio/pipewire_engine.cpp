@@ -683,8 +683,10 @@ int PipeWireEngine::run() {
                     1000.0 * static_cast<double>(impl_->options.latency_frames) / sample_rate);
         for (std::size_t index = 0; index < impl_->state.plugin_chain.size(); ++index) {
             const auto& plugin = impl_->state.plugin_chain[index];
-            std::printf("Plugin chain %zu: %s (latency %u frames)\n",
-                        index + 1, plugin->plugin_path().c_str(), plugin->latency_frames());
+            std::printf("Plugin chain %zu: %s%s (latency %u frames)\n",
+                        index + 1, plugin->plugin_path().c_str(),
+                        impl_->state.processor_chain.is_bypassed(index) ? " [BYPASSED]" : "",
+                        plugin->latency_frames());
         }
         std::printf("Press Ctrl+C to stop.\n");
         impl_->published_running.store(true, std::memory_order_release);

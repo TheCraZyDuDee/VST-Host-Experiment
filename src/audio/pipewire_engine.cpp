@@ -41,6 +41,7 @@ struct EngineState {
     ProcessorChain processor_chain;
     std::size_t latency_frames{128};
     int setup_error{0};
+    std::string setup_error_message;
 };
 
 void request_shutdown(void* userdata, int) {
@@ -77,8 +78,9 @@ void on_capture_state_changed(void* userdata, pw_stream_state, pw_stream_state s
                               const char* error) {
     if (state == PW_STREAM_STATE_ERROR) {
         auto* data = static_cast<EngineState*>(userdata);
-        std::fprintf(stderr, "PipeWire capture stream error: %s\n",
-                     error != nullptr ? error : "unknown error");
+        data->setup_error_message = std::string("PipeWire capture stream error: ") +
+            (error != nullptr ? error : "unknown error");
+        std::fprintf(stderr, "%s\n", data->setup_error_message.c_str());
         data->setup_error = -EIO;
         if (data->loop != nullptr) {
             pw_main_loop_quit(data->loop);
@@ -124,8 +126,9 @@ void on_source_state_changed(void* userdata, pw_stream_state, pw_stream_state st
                              const char* error) {
     auto* data = static_cast<EngineState*>(userdata);
     if (state == PW_STREAM_STATE_ERROR) {
-        std::fprintf(stderr, "PipeWire virtual microphone error: %s\n",
-                     error != nullptr ? error : "unknown error");
+        data->setup_error_message = std::string("PipeWire virtual microphone error: ") +
+            (error != nullptr ? error : "unknown error");
+        std::fprintf(stderr, "%s\n", data->setup_error_message.c_str());
         data->setup_error = -EIO;
         if (data->loop != nullptr) {
             pw_main_loop_quit(data->loop);
@@ -162,6 +165,13 @@ struct PipeWireEngine::Impl {
     PipeWireOptions options;
     EngineState state;
     std::string last_error;
+
+    int fail(std::string message, int result) {
+        last_error = std::move(message);
+        std::fprintf(stderr, "%s\n", last_error.c_str());
+        return result;
+    }
+
     spa_hook capture_listener{};
     spa_hook source_listener{};
     bool initialized{false};
@@ -184,15 +194,13 @@ struct PipeWireEngine::Impl {
             PW_KEY_NODE_VIRTUAL, "true",
             nullptr);
         if (properties == nullptr) {
-            return -ENOMEM;
+            return fail("Could not allocate PipeWire virtual microphone properties.", -ENOMEM);
         }
 
         state.source_stream = pw_stream_new(
             state.core, options.output_name.c_str(), properties);
-        if (state.source_stream == nullptr) {
-            std::fprintf(stderr, "Could not create PipeWire virtual microphone stream.\n");
-            return -ENOMEM;
-        }
+        if (state.source_stream == nullptr)
+            return fail("Could not create PipeWire virtual microphone stream.", -ENOMEM);
 
         pw_stream_add_listener(state.source_stream, &source_listener,
                                &source_events, &state);
@@ -213,11 +221,9 @@ struct PipeWireEngine::Impl {
             static_cast<pw_stream_flags>(PW_STREAM_FLAG_MAP_BUFFERS |
                                          PW_STREAM_FLAG_RT_PROCESS),
             params, 1);
-        if (connect_result < 0) {
-            std::fprintf(stderr, "Could not publish virtual microphone: %s\n",
-                         std::strerror(-connect_result));
-            return connect_result;
-        }
+        if (connect_result < 0)
+            return fail(std::string("Could not publish virtual microphone: ") +
+                        std::strerror(-connect_result), connect_result);
         return 0;
     }
 
@@ -230,9 +236,8 @@ struct PipeWireEngine::Impl {
             PW_KEY_NODE_DESCRIPTION, "VST Host Microphone Capture",
             PW_KEY_NODE_LATENCY, latency.c_str(),
             nullptr);
-        if (properties == nullptr) {
-            return -ENOMEM;
-        }
+        if (properties == nullptr)
+            return fail("Could not allocate PipeWire capture stream properties.", -ENOMEM);
         if (!options.input_target.empty()) {
             pw_properties_set(properties, PW_KEY_TARGET_OBJECT,
                               options.input_target.c_str());
@@ -240,10 +245,8 @@ struct PipeWireEngine::Impl {
 
         state.capture_stream = pw_stream_new(
             state.core, "vst-host-capture", properties);
-        if (state.capture_stream == nullptr) {
-            std::fprintf(stderr, "Could not create PipeWire capture stream.\n");
-            return -ENOMEM;
-        }
+        if (state.capture_stream == nullptr)
+            return fail("Could not create PipeWire capture stream.", -ENOMEM);
 
         std::uint8_t pod_buffer[1024];
         spa_pod_builder builder = SPA_POD_BUILDER_INIT(pod_buffer, sizeof(pod_buffer));
@@ -265,11 +268,9 @@ struct PipeWireEngine::Impl {
                                          PW_STREAM_FLAG_MAP_BUFFERS |
                                          PW_STREAM_FLAG_RT_PROCESS),
             params, 1);
-        if (connect_result < 0) {
-            std::fprintf(stderr, "Could not connect to microphone: %s\n",
-                         std::strerror(-connect_result));
-            return connect_result;
-        }
+        if (connect_result < 0)
+            return fail(std::string("Could not connect to microphone: ") +
+                        std::strerror(-connect_result), connect_result);
         return 0;
     }
 };
@@ -362,20 +363,17 @@ int PipeWireEngine::run() {
         impl_->published_loop.store(impl_->state.loop, std::memory_order_release);
     }
     if (impl_->state.loop == nullptr) {
-        std::fprintf(stderr, "Could not create PipeWire main loop.\n");
-        return -ENOMEM;
+        return impl_->fail("Could not create PipeWire main loop.", -ENOMEM);
     }
 
     impl_->state.context = pw_context_new(
         pw_main_loop_get_loop(impl_->state.loop), nullptr, 0);
     if (impl_->state.context == nullptr) {
-        std::fprintf(stderr, "Could not create PipeWire context.\n");
-        return -ENOMEM;
+        return impl_->fail("Could not create PipeWire context.", -ENOMEM);
     }
     impl_->state.core = pw_context_connect(impl_->state.context, nullptr, 0);
     if (impl_->state.core == nullptr) {
-        std::fprintf(stderr, "Could not connect to PipeWire.\n");
-        return -EIO;
+        return impl_->fail("Could not connect to PipeWire.", -EIO);
     }
 
     pw_loop_add_signal(pw_main_loop_get_loop(impl_->state.loop), SIGINT,
@@ -408,8 +406,8 @@ int PipeWireEngine::run() {
             plugin_paths.push_back(path);
     }
     if (preloaded_plugins.size() > plugin_paths.size()) {
-        std::fprintf(stderr, "More preloaded VST3 instances than plugin paths were supplied.\n");
-        return -EINVAL;
+        return impl_->fail(
+            "More preloaded VST3 instances than plugin paths were supplied.", -EINVAL);
     }
     impl_->state.plugin_chain.reserve(plugin_paths.size());
     for (std::size_t index = 0; index < plugin_paths.size(); ++index) {
@@ -417,9 +415,9 @@ int PipeWireEngine::run() {
         if (!plugin) plugin = std::make_shared<Vst3Processor>(plugin_paths[index]);
         std::string plugin_error;
         if (!plugin->load(plugin_error)) {
-            std::fprintf(stderr, "Could not load VST3 plugin %zu ('%s'): %s\n",
-                         index + 1, plugin_paths[index].c_str(), plugin_error.c_str());
-            return -EINVAL;
+            return impl_->fail("Could not load VST3 plugin " +
+                std::to_string(index + 1) + " ('" + plugin_paths[index] +
+                "'): " + plugin_error, -EINVAL);
         }
         impl_->state.processor_chain.add(*plugin);
         impl_->state.plugin_paths.push_back(plugin_paths[index]);
@@ -428,12 +426,12 @@ int PipeWireEngine::run() {
 
     const AudioProcessSpec process_spec{sample_rate, channel_count, 1024};
     if (!impl_->state.processor.prepare(process_spec)) {
-        std::fprintf(stderr, "Could not prepare audio processor.\n");
-        return -EINVAL;
+        return impl_->fail("Could not prepare the output gain processor.", -EINVAL);
     }
     if (!impl_->state.processor_chain.prepare(process_spec)) {
-        std::fprintf(stderr, "Could not prepare the ordered VST3 processor chain.\n");
-        return -EINVAL;
+        return impl_->fail(
+            "Could not prepare the VST3 processing chain. Check plugin format and audio I/O support.",
+            -EINVAL);
     }
 
     auto result = impl_->create_source_stream();
@@ -461,6 +459,11 @@ int PipeWireEngine::run() {
         std::printf("Press Ctrl+C to stop.\n");
         pw_main_loop_run(impl_->state.loop);
         result = impl_->state.setup_error;
+        if (result != 0) {
+            impl_->last_error = impl_->state.setup_error_message.empty()
+                ? "PipeWire stream stopped with an error. See the terminal for details."
+                : impl_->state.setup_error_message;
+        }
         const auto dropped = impl_->state.ring.dropped_frames();
         const auto underruns = impl_->state.ring.underrun_frames();
         const auto stale = impl_->state.ring.stale_frames();

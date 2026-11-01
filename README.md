@@ -118,6 +118,38 @@ compatible, and the Host Controls fallback is still available. The bridge
 is not downloaded or installed automatically. For details, see
 [Windows VST3 bridge architecture and migration](docs/windows-vst3-bridge.md).
 
+### Fixing Windows plugin GUI rendering with DXVK
+
+If a Windows VST3 effect **accepts mouse input and audibly changes its
+processing, but the graphical sliders only visually refresh after switching
+tabs or reopening the editor**, check Wine's graphics backend before
+modifying the host. Installing and configuring **DXVK** in the plugin's
+Wine prefix resolved this behavior in desktop testing with **RNNoise and
+Supertone Clear under Wine 11.20 and vstbridge**.
+
+DXVK requires working Vulkan drivers and is an external Wine dependency.
+Back up the correct Wine prefix before installing it. With `winetricks`,
+a typical command for a **specific** prefix is:
+
+```sh
+WINEPREFIX="/path/to/plugin-wine-prefix" winetricks -q dxvk
+```
+
+Do not assume every plugin uses `~/.wine`: the bridge can launch plugins
+under different prefixes. DXVK is not installed or changed automatically
+by VST Host Experiment. The experimental periodic-redraw workaround was
+**not merged** because the underlying rendering issue was resolved by
+configuring Wine correctly.
+
+### Plugin browser and startup feedback
+
+The GUI displays readable plugin names instead of full bundle paths (hover
+to inspect a path), includes a name/path filter in the available-plugin
+browser, and numbers the active chain in processing order. Drag-and-drop
+reordering is saved immediately, not just on the next audio start.
+If plugin loading or PipeWire startup fails, the status area shows the
+actual error, including the failed plugin path when available.
+
 ## Known limitations
 
 - Windows VST3 support is optional and requires Wine plus a separately installed bridge: [vstbridge](https://github.com/rations/vstbridge) (preferred) or yabridge (fallback). The host runs the selected tool's `add`, `sync`, and `status` commands; it does not install either bridge. Each bridge's plugin-directory configuration is shared with other hosts, so removing a directory from this app does not unregister it from the bridge.

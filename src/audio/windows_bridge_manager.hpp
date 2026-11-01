@@ -415,6 +415,13 @@ inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& 
                       vst2_directory) == options.plugin_directories.end())
             options.plugin_directories.push_back(vst2_directory);
     }
+    // vstbridge/yabridge also support inline installation: .so chainloaders
+    // can sit next to the Windows .dll rather than ~/.vst/<backend>.
+    for (const auto& windows_root : options.windows_plugin_directories) {
+        if (std::find(options.plugin_directories.begin(), options.plugin_directories.end(),
+                      windows_root) == options.plugin_directories.end())
+            options.plugin_directories.push_back(windows_root);
+    }
 #endif
     if (selected) *selected = *bridge;
     return true;

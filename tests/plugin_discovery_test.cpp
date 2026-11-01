@@ -110,6 +110,46 @@ int main() {
         {native_a.string(), native_b.string()});
     if (native.size() != 2) return 13;
 
+    // Native Linux VST2 uses .so; a VST3 bundle may contain unrelated .so
+    // binaries, which must NOT appear as separate VST2 effects.
+    const auto so_a = root / "native-vst2" / "Equalizer.so";
+    const auto inside_vst3 = root / "vendor-a" / "Alpha.vst3" /
+                             "Contents" / "x86_64-linux" / "Alpha.so";
+    std::filesystem::create_directories(so_a.parent_path());
+    std::filesystem::create_directories(inside_vst3.parent_path());
+    std::ofstream(so_a) << "native VST2";
+    std::ofstream(inside_vst3) << "VST3 binary, not a VST2";
+    if (vst_host::audio::plugin_format(so_a.string()) !=
+            vst_host::audio::PluginFormat::Vst2 ||
+        vst_host::audio::plugin_format(native_a.string()) !=
+            vst_host::audio::PluginFormat::Vst3) return 14;
+    const auto native_vst2 = vst_host::audio::discover_vst2_plugins({root.string()});
+    if (std::find(native_vst2.begin(), native_vst2.end(), so_a.string()) ==
+            native_vst2.end() ||
+        std::find(native_vst2.begin(), native_vst2.end(), inside_vst3.string()) !=
+            native_vst2.end()) return 15;
+
+    // Two vstbridge VST2 chainloaders with distinct .so paths but the same
+    // adjacent original .dll target are one library entry.
+    const auto dll = root / "Windows Plugins" / "VST2" / "Equalizer.dll";
+    std::filesystem::create_directories(dll.parent_path());
+    std::ofstream(dll) << "Windows VST2 binary";
+    const auto bridge_a = root / ".vst" / "vstbridge" / "Equalizer.so";
+    const auto bridge_b = root / ".vst" / "vstbridge" / "VST2" / "Equalizer.so";
+    for (const auto& so : {bridge_a, bridge_b}) {
+        std::filesystem::create_directories(so.parent_path());
+        std::ofstream(so) << "bridge shared library";
+        auto adjacent_dll = so;
+        adjacent_dll.replace_extension(".dll");
+        std::filesystem::create_symlink(dll, adjacent_dll);
+    }
+    if (vst_host::audio::vst2_plugin_source_identity(bridge_a.string()) !=
+        vst_host::audio::vst2_plugin_source_identity(bridge_b.string())) return 16;
+    auto mixed = vst_host::audio::deduplicate_vst3_browser_entries(
+        {{bridge_a.string(), true}, {bridge_b.string(), true},
+         {so_a.string(), false}, {native_a.string(), false}}, &discarded);
+    if (mixed.size() != 3 || discarded != 1) return 17;
+
     std::filesystem::remove_all(root);
     return 0;
 }

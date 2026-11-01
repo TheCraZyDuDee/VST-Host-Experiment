@@ -667,6 +667,7 @@ public:
         auto* chainLayout = new QVBoxLayout(chainPanel);
         chainLayout->setSpacing(6);
         auto* columns = new QSplitter(Qt::Horizontal, central);
+        workspaceSplitter_ = columns;
         columns->setChildrenCollapsible(false);
         columns->addWidget(browserPanel);
         columns->addWidget(chainPanel);
@@ -1133,6 +1134,10 @@ private:
     void loadSettings() {
         QSettings settings(QStringLiteral("VSTHostExperiment"),
                            QStringLiteral("VSTHostExperiment"));
+        const auto workspaceState =
+            settings.value(QStringLiteral("ui/workspaceSplitter")).toByteArray();
+        if (!workspaceState.isEmpty())
+            (void)workspaceSplitter_->restoreState(workspaceState);
         settings.beginGroup(QStringLiteral("audio"));
         const auto paths = settings.value(QStringLiteral("pluginChain")).toStringList();
         const auto kinds = settings.value(QStringLiteral("pluginChainWine")).toList();
@@ -1204,6 +1209,8 @@ private:
         settings.setValue(QStringLiteral("latencyFrames"), latency_->currentText());
         settings.setValue(QStringLiteral("gainBypassed"), bypass_->isChecked());
         settings.endGroup();
+        settings.setValue(QStringLiteral("ui/workspaceSplitter"),
+                          workspaceSplitter_->saveState());
         settings.sync();
     }
 
@@ -1760,6 +1767,7 @@ private:
         }
     }
 
+    QSplitter* workspaceSplitter_{};
     QLineEdit* pluginPath_{};
     QListWidget* availablePlugins_{};
     QSet<QString> availablePluginPaths_;

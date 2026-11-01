@@ -1,71 +1,57 @@
 # Architecture
 
-## Design constraints
+VST Host Experiment is a C++20 PipeWire audio engine with an optional Qt 6 frontend. The CLI and GUI use the same processing, discovery and portable configuration code.
 
-1. The audio engine must be usable without a GUI.
-2. The real-time processing path must not allocate memory, take contended locks, log synchronously, access files, or wait on UI/plugin-management work.
-3. Device changes, plugin scanning, plugin loading, and configuration parsing happen outside the audio callback.
-4. The engine should report failures clearly and recover without leaving a partially configured signal chain.
-5. Idle operation should not poll aggressively. Prefer event-driven device/session APIs where available.
+## Audio flow
 
-## Current audio prototype
+```text
+Selected microphone (PipeWire capture stream)
+    ↓
+Preallocated stereo single-producer/single-consumer ring buffer
+    ↓
+Ordered effect chain: VST2 / VST3 (per-instance live bypass)
+    ↓
+Output gain or gain bypass
+    ↓
+Named PipeWire virtual microphone (Audio/Source/Virtual)
+```
 
-The current prototype uses PipeWire's native C API and a pre-prepared ordered processor chain:
+The engine processes **stereo 32-bit float audio at 48 kHz**. Capture and virtual-source callbacks exchange audio through a fixed-capacity, nonblocking ring buffer. An underrun outputs silence; overflow drops incoming frames; stale frames can be skipped after a long delay. The GUI reports cumulative underrun, dropped and stale frame counts.
 
-- A capture stream requests interleaved 32-bit float stereo audio at 48 kHz.
-- A fixed-capacity single-producer/single-consumer ring buffer separates the capture callback from the virtual-source callback.
-- Both streams request a configurable PipeWire node latency (256 frames by default at 48 kHz); PipeWire and client graph settings may override the effective interval.
-- The source callback runs each VST3 effect in chain order, then applies fixed gain (or bypasses it), emits silence on underrun, and discards excessive stale queue backlog to avoid long delayed playback after suspension.
-- The output node is configured with `media.class = Audio/Source/Virtual` and a configurable node name.
+The host allocates plugin scratch buffers during preparation, not during each callback. It does not lock, scan files, load plugins, or update Qt widgets in the real-time callbacks. **Third-party plugins may have their own real-time safety limitations.**
 
-The ring buffer avoids locks and dynamic allocation in both callbacks. Producer overflow drops incoming frames; if the consumer falls far behind, it skips old queued frames and keeps a small scheduling cushion. Underruns are filled with silence. Latency still needs measurement on the target system.
+## Input and device lifetime
 
-## Limitations to verify
+With the default input, PipeWire selects the system's capture source. With an explicitly selected PipeWire `node.name`, the capture stream uses WirePlumber's `node.dont-fallback`, `node.linger` and `node.dont-move` properties. A PipeWire registry listener tracks that source across temporary node-ID changes.
 
-PipeWire format negotiation, mono devices, node exposure in different desktop environments, and reconnect behavior need testing on actual Linux/PipeWire systems. In particular, verify that the output appears as a selectable microphone source, rather than only as an application stream. If necessary, use a supported PipeWire virtual-source/loopback topology while retaining the processing engine.
+When the named source disappears or capture is inactive, the output stream stays alive but produces silence; buffered pre-disconnect audio is discarded. On reconnection to the same named source, processing resumes. This requires compatible session-manager behavior.
 
-## Processor interface\n\n`AudioProcessor` defines `prepare()` for non-real-time setup, `process()` for in-place interleaved float audio, `reset()`, and optional latency reporting. The callback-facing `process()` contract forbids blocking, allocation, logging, I/O, and exceptions. The current `GainProcessor` implements this interface and is prepared before PipeWire streams start. Processor configuration is currently startup-only; live parameter updates need a bounded control-transfer mechanism before they are exposed. Native plugin adapters must follow the same contract and prepare all plugin buffers/state outside the callback.\n\n## Component boundaries
+## Processor and plugin boundaries
 
-- **Application shell:** command-line options, configuration path, lifecycle and diagnostics.
-- **Audio backend:** input/output stream setup, channel layout, sample-rate and buffer negotiation.
-- **Processing graph:** ordered chain of processors, with explicit channel and latency handling.
-- **Plugin adapter:** plugin discovery, loading, parameter/state management, and format-specific details.
-- **Virtual output:** publish processed audio to a named PipeWire source.
-- **Optional UI:** device selection, chain ordering, bypass, meters and configuration. The engine must not depend on Qt or any other UI library.
+| Code | Responsibility |
+| --- | --- |
+| `src/audio/pipewire_engine.*` | Streams, lifecycle, input pinning, chain setup, diagnostics |
+| `src/audio/stereo_ring_buffer.hpp` | Bounded lock-free capture/output transfer |
+| `src/audio/processor_chain.hpp` | Ordered effects and atomic per-effect bypass |
+| `src/audio/audio_processor.hpp` / `plugin_processor.hpp` | Common real-time DSP and plugin/editor contracts |
+| `src/audio/vst3_processor.*` | VST3 loading, bus adaptation, editor, parameter/state handling |
+| `src/audio/vst2_processor.*` | Optional legacy VST2 effect ABI, channel mapping, state |
+| `src/audio/plugin_discovery.hpp` | Native plugin scanning and wrapper identity |
+| `src/audio/windows_bridge_manager.hpp` | External Wine bridge registration/sync |
+| `src/audio/windows_plugin_scope.hpp` | Restrict global bridge discoveries to selected Windows roots |
+| `src/audio/config.hpp` / `plugin_state.hpp` | Portable settings and bounded binary state encoding |
+| `src/gui/main.cpp` | Qt plugin browser, chain controls, device UI, native X11 editor surface |
 
-## Plugin strategy
+The GUI scans devices and plugin directories off the UI thread. It retains an explicitly selected processing chain; the headless CLI additionally appends discovered effects automatically. Wine bridge synchronization runs before audio starts, outside audio callbacks.
 
-Implement and test native Linux plugins first. The initial VST3 adapter uses the Steinberg hosting SDK when `VST3_SDK_ROOT` is supplied at configure time; the SDK is optional and the default build remains SDK-free. It loads one audio-effect class from a selected bundle and currently supports the first stereo input/output bus. Plug-in discovery, multi-effect chains, controller/editor support, state persistence, and robust bus negotiation remain future work. The audio callback uses preallocated planar scratch buffers to adapt the host’s interleaved stereo format to VST3’s process API. Third-party plug-ins are not guaranteed to be real-time safe, and this initial adapter still requires build and runtime validation with real Linux effects. VST2 support requires a separate licensing/distribution review.
+## Parameters and state
 
-Windows-only plugins are out of scope for the first working prototype. A later Wine-based compatibility layer would require its own helper process, diagnostics, and per-plugin compatibility tests; it must not be a prerequisite for native Linux use.
+Plugin editor changes are sent toward DSP processing through bounded parameter-event queues. Per-effect bypass is read through an atomic flag, so toggling it does not rebuild the chain.
 
+On orderly shutdown, the host disconnects PipeWire streams before requesting VST2/VST3 plugin-state snapshots. Each ordered instance owns a distinct snapshot. VST3 state uses component and controller streams; VST2 uses plugin chunks where supported or saved parameter values. The Qt settings store and the shared `.vsthost` format can restore these states on the next start.
 
-## Portable host configurations
+## Build boundaries
 
-The CLI and optional Qt frontend share the line-oriented `.vsthost` format implemented in `src/audio/config.hpp`. It stores the PipeWire input target, virtual-source name, gain, requested latency, gain bypass, and an ordered list of native VST3 bundle paths. String values are quoted and escaped; repeated `plugin` keys preserve chain order. Unknown keys and invalid values fail loading rather than being silently ignored.
+`vst-host` is the headless executable. `vst-host-gui` adds Qt Widgets and the native X11/XEmbed editor surface. VST3 uses the pinned Steinberg SDK or a supplied checkout; VST2 is **disabled by default** and requires a user-provided, appropriately licensed legacy SDK. Neither Wine nor a bridge is bundled.
 
-The GUI's Load/Save configuration actions import and export this format. The CLI accepts `--config FILE` to start the same setup without Qt, and `--save-config FILE` to export the effective options. This is the supported lightweight background/headless path; it still runs inside the user's PipeWire session and does not require a GUI process. The file does not yet include plugin-internal controller/component state or plugin directory search paths.
-
-
-## Plugin search directories
-
-The plugin scanner in `src/audio/plugin_discovery.hpp` recursively searches configured directories for Linux VST3 bundle directories (`*.vst3`). It stops recursion when a bundle is found so bundle-internal resources are not mistaken for separate plugins. Results are sorted for deterministic startup order. Explicit plugin paths remain first; directory discoveries are appended after them. Scanning and plugin loading happen before PipeWire streams start, never in a real-time callback. The Qt UI keeps a separate list of search directories and offers an explicit rescan action; discovered bundles are inserted into the editable processing chain. Search directories are stored in `.vsthost` files and desktop settings. The CLI uses repeated `--plugin-dir PATH` options.
-
-
-## Input device enumeration
-
-The optional Qt frontend queries the PipeWire registry on startup and on explicit refresh. It lists current `Audio/Source` and `Audio/Source/Virtual` nodes, displays descriptions and current node ids, and stores the selected `node.name` as the persistent target rather than the transient registry id. Enumeration runs on a worker thread and completes before its result is applied to widgets; it is never performed by an audio callback. The editable combo permits manual node-name entry, and an empty target retains PipeWire's default-source autoconnect behavior. Hotplug changes are reflected after pressing Refresh.
-
-
-## Windows VST3 startup integration
-
-When `windows_plugin_directories` is non-empty, `PipeWireEngine::run()` invokes `yabridgectl add` for each configured directory and then `yabridgectl sync` before creating the PipeWire streams. It resolves the generated VST3 wrapper directory from `yabridgectl status` (falling back to `~/.vst3/yabridge`) and adds that directory to the normal Linux VST3 scanner. The wrapper plugins therefore pass through the same VST3 processor and ordered chain as native Linux plugins. This work happens on the engine startup thread, never in the real-time callback.
-
-The Qt UI stores Windows plugin directories separately and lets the user start with only Windows plugin paths configured. Once the engine has loaded the chain, newly discovered wrapper paths are reflected in the chain list for editor access and future configuration saves. The CLI accepts repeated `--windows-plugin-dir PATH` arguments; `.vsthost` files use repeated `windows_plugin_directory` keys.
-
-The host does not install Wine or yabridge. `yabridgectl` must be available on `PATH`, at `~/.local/share/yabridge/yabridgectl`, or via the `YABRIDGECTL` environment variable. The host invokes yabridgectl as an external process without linking or vendoring its GPL-3.0-or-later implementation. `yabridgectl sync` operates on its global registered directory list, which may be shared with other audio hosts; this application does not automatically remove directories from that external list.
-
-
-## Runtime audio diagnostics
-
-The `StereoRingBuffer` tracks cumulative underrun and dropped-frame counts using relaxed atomic counters. `PipeWireEngine::diagnostics()` snapshots those counters without locking, and the Qt frontend polls them on its UI timer and displays the totals while the engine is running. The counters describe audio frames, not events; an underrun of 480 frames at 48 kHz represents 10 ms of missing input audio. They are diagnostic indicators rather than a substitute for a measured end-to-end latency test. The counters are cumulative for the lifetime of the engine instance and reset when a new engine is created.
+For setup and user workflows see [Getting started](getting-started.md); for format and configuration details see [Plugins](plugins.md).

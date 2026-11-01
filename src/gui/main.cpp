@@ -5,6 +5,7 @@
 #include "audio/windows_bridge_manager.hpp"
 #include "audio/windows_plugin_scope.hpp"
 #include "audio/vst3_processor.hpp"
+#include "gui/process_cpu_meter.hpp"
 
 #include <QApplication>
 #include <QByteArray>
@@ -1108,6 +1109,14 @@ public:
         diagnostics_ = new QLabel(tr("Audio diagnostics: not running"), central);
         diagnostics_->setWordWrap(true);
         root->addWidget(diagnostics_);
+        performance_ = new QLabel(tr("Performance: not running"), central);
+        performance_->setWordWrap(true);
+        performance_->setToolTip(tr(
+            "Host CPU is process-wide CPU time relative to one logical core; "
+            "100% means one fully occupied core. It excludes external Wine "
+            "bridge processes. Effect latency is the sum reported by active "
+            "plug-ins; it is not measured end-to-end PipeWire or device delay."));
+        root->addWidget(performance_);
         auto* note = new QLabel(
             tr("Plugin-specific editors use X11/XWayland. On native Wayland, "
                "the host's standard parameter controls remain available."), central);
@@ -1648,6 +1657,9 @@ private:
 
         previousDiagnostics_ = {};
         resetLevelMeters();
+        processCpuMeter_.reset();
+        (void)processCpuMeter_.sample(); // Establish CPU time baseline on UI thread.
+        performance_->setText(tr("Performance: starting audio…"));
         engineReadyShown_ = false;
         engine_ = std::make_unique<vst_host::audio::PipeWireEngine>(std::move(options));
         engineFinished_.store(false, std::memory_order_release);
@@ -1671,6 +1683,8 @@ private:
         const auto stateWarning = captureFinishedPluginStates();
         engine_.reset();
         resetLevelMeters();
+        processCpuMeter_.reset();
+        performance_->setText(tr("Performance: not running"));
         startButton_->setEnabled(true);
         stopButton_->setEnabled(false);
         setEditingEnabled(true);
@@ -1986,6 +2000,8 @@ private:
             const auto stateWarning = captureFinishedPluginStates();
             engine_.reset();
             resetLevelMeters();
+            processCpuMeter_.reset();
+            performance_->setText(tr("Performance: not running"));
             startButton_->setEnabled(true);
             stopButton_->setEnabled(false);
             editorButton_->setEnabled(false);
@@ -2001,6 +2017,27 @@ private:
             return;
         }
         updateLevelMeters(engine_->level_readings());
+        if (engine_->is_running()) {
+            const double cpuPercent = processCpuMeter_.sample();
+            std::uint64_t reportedLatencyFrames = 0;
+            const auto count = std::min(engine_->plugin_count(),
+                static_cast<std::size_t>(chainList_->count()));
+            for (std::size_t i = 0; i < count; ++i) {
+                if (chainList_->item(static_cast<int>(i))
+                        ->data(Qt::UserRole + 2).toBool())
+                    continue; // Bypassed effects do not process audio.
+                if (const auto* plugin = engine_->plugin_processor(i))
+                    reportedLatencyFrames += plugin->latency_frames();
+            }
+            const double reportedLatencyMs =
+                1000.0 * static_cast<double>(reportedLatencyFrames) / 48000.0;
+            performance_->setText(
+                tr("Host CPU: %1% of one core  |  "
+                   "active effects' reported latency: %2 frames (%3 ms)")
+                    .arg(cpuPercent, 0, 'f', 1)
+                    .arg(static_cast<qulonglong>(reportedLatencyFrames))
+                    .arg(reportedLatencyMs, 0, 'f', 1));
+        }
         const auto stats = engine_->diagnostics();
         // Distinguish ever-increasing cumulative totals from new loss over the
         // most recent UI polling period (normally 200 ms).
@@ -2095,6 +2132,8 @@ private:
     QCheckBox* bypassSelectedEffect_{};
     QLabel* status_{};
     QLabel* diagnostics_{};
+    QLabel* performance_{};
+    vst_host::gui::ProcessCpuMeter processCpuMeter_;
     std::array<QProgressBar*, 2> inputMeterBars_{};
     std::array<QProgressBar*, 2> outputMeterBars_{};
     std::array<std::uint64_t, 2> previousInputClips_{};

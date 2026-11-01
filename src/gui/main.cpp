@@ -2,7 +2,7 @@
 #include "audio/config.hpp"
 #include "audio/pipewire_devices.hpp"
 #include "audio/plugin_discovery.hpp"
-#include "audio/yabridge_manager.hpp"
+#include "audio/windows_bridge_manager.hpp"
 #include "audio/vst3_processor.hpp"
 
 #include <QApplication>
@@ -45,6 +45,7 @@
 #include <cstdlib>
 #include <memory>
 #include <future>
+#include <optional>
 #include <functional>
 #include <thread>
 #include <algorithm>
@@ -565,6 +566,7 @@ private:
 struct PluginScanResult {
     std::vector<std::pair<std::string, bool>> plugins;
     std::string warning;
+    std::optional<vst_host::audio::WindowsBridgeSelection> bridge;
 };
 
 class MainWindow final : public QMainWindow {
@@ -780,7 +782,8 @@ protected:
 
 private:
     static bool appearsToBeWineWrapper(const QString& path) {
-        return path.contains(QStringLiteral("/yabridge/"));
+        return path.contains(QStringLiteral("/yabridge/")) ||
+               path.contains(QStringLiteral("/vstbridge/"));
     }
 
     void addPluginDirectory(const QString& path, bool wine) {
@@ -984,11 +987,22 @@ private:
                     vst_host::audio::PipeWireOptions bridgeOptions;
                     bridgeOptions.windows_plugin_directories = std::move(wineDirectories);
                     std::string error;
-                    if (!vst_host::audio::prepare_windows_vst3_plugins(bridgeOptions, error)) {
+                    vst_host::audio::WindowsBridgeSelection selectedBridge;
+                    if (!vst_host::audio::prepare_windows_vst3_plugins(
+                            bridgeOptions, error, &selectedBridge)) {
                         result.warning += error + "\n";
                     } else {
-                        // yabridgectl's wrapper directory may also contain plugins
-                        // registered by other audio hosts (global yabridge configuration).
+                        result.bridge = selectedBridge;
+                        // Restore existing chains/configurations using the
+                        // equivalent vstbridge wrapper only after it exists.
+                        // Never accidentally reload yabridge for a migrated entry.
+                        for (auto& entry : result.plugins) {
+                            if (entry.second)
+                                entry.first = vst_host::audio::detail::migrate_vst3_wrapper_path(
+                                    entry.first, selectedBridge);
+                        }
+                        // Bridge wrappers are discovered, but never appended
+                        // to the running chain without an explicit selection.
                         auto wrappers = vst_host::audio::discover_vst3_plugins(
                             bridgeOptions.plugin_directories, &result.warning);
                         for (auto& path : wrappers)
@@ -1054,7 +1068,7 @@ private:
 
         auto options = optionsFromUi();
         // Directory discovery populates the browser only. Never let the engine
-        // auto-activate unselected Linux plugins or all global yabridge wrappers.
+        // auto-activate unselected Linux plugins or all global bridge wrappers.
         // Headless CLI directory auto-loading remains unchanged.
         options.plugin_directories.clear();
         options.windows_plugin_directories.clear();
@@ -1236,6 +1250,23 @@ private:
             pluginScanFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
             auto result = pluginScanFuture_.get();
             pluginScanPending_ = false;
+            int migratedEntries = 0;
+            if (result.bridge) {
+                for (int i = 0; i < chainList_->count(); ++i) {
+                    auto* item = chainList_->item(i);
+                    if (!item->data(Qt::UserRole + 1).toBool()) continue;
+                    const auto oldPath = item->data(Qt::UserRole).toString().toStdString();
+                    const auto newPath = vst_host::audio::detail::migrate_vst3_wrapper_path(
+                        oldPath, *result.bridge);
+                    if (oldPath == newPath) continue;
+                    const auto path = QString::fromStdString(newPath);
+                    item->setData(Qt::UserRole, path);
+                    item->setText(path + tr(" (WINE)"));
+                    item->setToolTip(path);
+                    ++migratedEntries;
+                }
+                if (migratedEntries > 0) saveSettings();
+            }
             const auto selected = availablePlugins_->currentItem()
                 ? availablePlugins_->currentItem()->data(Qt::UserRole).toString() : QString();
             availablePlugins_->clear();
@@ -1250,10 +1281,20 @@ private:
             if (availablePlugins_->currentRow() < 0 && availablePlugins_->count() > 0)
                 availablePlugins_->setCurrentRow(0);
             setEditingEnabled(!engine_);
-            status_->setText(!result.warning.empty()
-                ? QString::fromStdString(result.warning)
-                : tr("Plugin scan complete: %1 available effect(s).")
-                    .arg(availablePlugins_->count()));
+            QString summary = tr("Plugin scan complete: %1 available effect(s).")
+                .arg(availablePlugins_->count());
+            if (result.bridge) {
+                summary += tr(" Windows bridge: %1.")
+                    .arg(QString::fromStdString(
+                        std::string(vst_host::audio::bridge_name(result.bridge->backend))));
+            }
+            if (migratedEntries > 0) {
+                summary += tr(" Migrated %1 saved effect path(s) to the selected bridge.")
+                    .arg(migratedEntries);
+            }
+            if (!result.warning.empty())
+                summary += QStringLiteral("\n") + QString::fromStdString(result.warning);
+            status_->setText(summary);
         }
         if (!engine_) return;
         if (engineFinished_.load(std::memory_order_acquire)) {

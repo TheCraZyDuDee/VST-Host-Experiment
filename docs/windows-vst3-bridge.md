@@ -1,59 +1,102 @@
-# Windows VST3 compatibility evaluation
+# Windows VST3 bridging: vstbridge preferred, yabridge fallback
 
-## Recommendation
+## Decision
 
-Use Wine plus yabridge as an optional compatibility backend rather than implementing a new Windows VST3/COM proxy layer in this host.
+**Prefer [vstbridge](https://github.com/rations/vstbridge) for Windows VST3
+plugins**, with [yabridge](https://github.com/robbert-vdh/yabridge) as a
+compatibility fallback. Both are optional external applications, not bundled,
+downloaded, or installed by the VST Host Experiment.
 
-The host should remain a native Linux process. Only Windows plugin code should run under Wine, in yabridge's plugin-host process. The resulting Linux-side VST3 wrapper can then be loaded by the existing native VST3 processor chain. This avoids running the audio engine, PipeWire streams, or Qt frontend under Wine.
+The native host still uses the same C++ VST3 processor and PipeWire engine.
+A Wine bridge produces Linux VST3 wrappers, which the host discovers and
+loads through its existing processor chain. Wine and the plugin processes
+remain external. Native Linux VST3 effects need neither bridge.
 
-The initial integration is now implemented in the host: configured Windows VST3 directories are registered with yabridge, synchronized before PipeWire starts, and the generated Linux-side VST3 wrappers are loaded through the normal processor chain. The host still depends on separately installed Wine and yabridge binaries.
+This changes the **bridge backend**, not the `.vsthost` file format: the
+`windows_plugin_directory` keys still point to Windows plug-in directories.
 
-## Why this approach
+## Why vstbridge
 
-- Wine translates Windows system calls to Linux; it is not a CPU emulator. A compatible Windows plugin can execute on the host CPU.
-- yabridge already implements the difficult VST3 object/interface proxying, Windows message-loop handling, plugin lifecycle, and compatibility behavior.
-- yabridge uses Unix-domain sockets for control/callback traffic and shared memory for audio buffers, with the socket channel also providing synchronization. That avoids serializing/copying full audio buffers through ordinary messages on every block.
-- VST3 instances from the same module are hosted in one Wine process, matching the VST3 module/factory model.
-- The host can continue using its existing processor chain and real-time callback contract through the Linux wrapper.
+- vstbridge is an actively updated yabridge fork. Version **0.0.4**, released
+  October 28, 2026, contains compatibility changes for recent Wine versions
+  and multi-monitor editor input fixes. The 0.0.4 notes mention Wine 11.20
+  on ARM, but do not establish that the user's x86_64 plugin combination works.
+- It specifically implements a Windows-side XEmbed coordinate correction
+  for the failure in which a VST3 GUI renders but ignores mouse input.
+- `vstbridgectl` supports the same `add`, `sync`, and `status` commands
+  already used by our engine.
+- The fork installs its VST3 wrappers into `~/.vst3/vstbridge/`, separate
+  from yabridge's `~/.vst3/yabridge/`.
+- Wine GUI interaction remains plugin-, Wine-, desktop-, and bridge-dependent.
+  Compatibility with RNNoise and Supertone Clear still requires testing.
 
-Sources:
-- [yabridge architecture](https://github.com/robbert-vdh/yabridge/blob/master/docs/architecture.md)
-- [yabridge project and compatibility notes](https://github.com/robbert-vdh/yabridge)
-- [Wine overview](https://www.winehq.org/)
+See:
+- [vstbridge project](https://github.com/rations/vstbridge)
+- [vstbridge 0.0.4 release](https://github.com/rations/vstbridge/releases/tag/v0.0.4)
+- [yabridge changelog](https://github.com/robbert-vdh/yabridge/blob/master/CHANGELOG.md)
 
-## Implemented user experience
+## Install and migration
 
-1. The GUI and portable configuration have a separate Windows VST3 search-directory list.
-2. The host locates yabridgectl on PATH, at `~/.local/share/yabridge/yabridgectl`, or through `YABRIDGECTL`.
-3. The host invokes `yabridgectl add` for configured directories and `yabridgectl sync` before plugin loading. It does not install system packages or change the user's Wine prefix.
-4. yabridge selects the Wine prefix associated with each plugin directory using its normal behavior.
-5. The host reads `yabridgectl status` to find the generated VST3 wrapper directory and adds it to the native VST3 scanner.
-6. The wrappers are loaded into the existing ordered processor chain and are exposed in the GUI chain list after startup.
-7. Bridge setup errors are surfaced in the GUI status line and CLI output. Runtime bridge crash isolation and recovery remain future work.
+Install vstbridge separately using the instructions and architecture-specific
+release package in the upstream release. The project's installer normally
+puts `vstbridgectl` under `~/.local/share/vstbridge/vstbridgectl`.
+Do **not** rename yabridge's installed binaries or symlink its directories
+into vstbridge: their runtime libraries and configuration files are separate.
 
-The first implementation should support 64-bit Windows VST3 effects. 32-bit bridging, plugin installers, licensing/activation helpers, and editor edge cases should be treated as compatibility follow-ups rather than assumed to work.
+VST Host Experiment finds the bridge control tool in this order:
 
-## Performance and real-time constraints
+1. A valid explicit `VSTBRIDGECTL` path or executable, if specified.
+2. A valid explicit `YABRIDGECTL` path or executable, if specified.
+3. `~/.local/share/vstbridge/vstbridgectl` or `vstbridgectl` on `PATH`.
+4. `~/.local/share/yabridge/yabridgectl` or `yabridgectl` on `PATH`.
 
-The Wine process is an unavoidable additional process for Windows-only plugins. yabridge's shared-memory audio path is preferable to designing a new per-block socket serialization protocol. The host must still measure callback duration and xruns with real plugins; "low overhead" is not a promise of zero overhead. Wine scheduling, plugin thread behavior, GUI rendering, and plugin-specific DSP can all affect latency stability.
+An explicit but invalid override is an error, not permission to silently use
+a different bridge. The process uses `posix_spawnp` with an argument vector;
+plugin directory paths are never shell-interpolated.
 
-The bridge must be initialized and warmed up before the PipeWire stream starts. No process launch, socket setup, shared-memory allocation, plugin scanning, or Wine prefix work may occur in the audio callback. A bridge failure must never block the native audio thread indefinitely; the host should emit silence for the affected stage or stop the chain cleanly.
+The GUI's single Linux/Windows directory list and portable configuration keys
+are unchanged. On **Scan all**, Windows directories are registered with the
+selected tool and synchronized in a background worker. Native wrappers appear
+in the available-plugin browser with the `(WINE)` label. The GUI status
+identifies the active bridge.
 
-## Licensing and packaging
+Existing chain entries pointing at `~/.vst3/yabridge/...` are migrated to the
+equivalent path under the selected vstbridge wrapper directory **only if that
+new path already exists**. The reverse migration is supported for an explicit
+yabridge fallback. This preserves the order and number of effect instances.
+If no equivalent wrapper exists, the original path is kept; users can
+re-scan, confirm synchronization, and re-add the effect explicitly. CLI
+chains containing explicit wrapper paths are migrated on startup when
+Windows directories were configured and synchronized.
 
-The yabridge project is GPL-3.0-or-later. The current host repository does not declare a project license. Do not vendor yabridge source or link against its code until the host's license and distribution obligations have been reviewed. A first integration can treat yabridge and Wine as optional external runtime dependencies and invoke their documented command-line tooling, without copying their implementation.
+**Important:** Existing per-plug-in settings or state are not migrated by
+this mechanism; this host currently saves plugin paths and audio settings,
+not native VST3 plugin state. yabridge and vstbridge have distinct global
+configuration and plugin wrapper directories. Removing a Windows search
+directory from our UI does not unregister it from the external bridge.
 
-Wine and yabridge are optional dependencies. Native Linux VST3 hosting and the default headless build must continue to work when neither is installed.
+## Runtime behavior
 
-## Known compatibility limits
+The bridge must be prepared before PipeWire audio starts. No bridge launch,
+plugin scan, Wine initialization, filesystem traversal, or wrapper allocation
+happens inside the real-time processing callback. The GUI starts only plugins
+selected in the active chain; discovery never auto-activates every wrapper.
+The CLI retains its documented directory-discovery/auto-loading behavior.
 
-Wine does not guarantee that every Windows plugin will work. Plugins may depend on Windows services, installers, activation systems, graphics APIs, codecs, or drivers that are unavailable or incompatible. Some plugins may require extra Wine components or graphics libraries. The UI must show unsupported or failed plugins explicitly and must not report a successful load merely because a wrapper file exists.
+Status and preparation errors from the selected bridge are surfaced in the
+GUI or CLI. Native Linux plug-ins remain unaffected if no Windows directories
+are configured. The host does not download or install either bridge.
 
-## Implementation status
+## Limitations and follow-ups
 
-- [x] Evaluate the lowest-overhead practical architecture.
-- [x] Add Windows VST3 directories to configuration and GUI.
-- [x] Detect yabridgectl and invoke its documented setup/sync commands; dependency installation remains external.
-- [x] Synchronize Windows plugin wrappers and load them through the native chain.
-- [ ] Add bridge lifecycle monitoring, failure isolation, and runtime diagnostics.
-- [ ] Validate latency, xruns, editor behavior, and representative Windows plugins on Linux hardware.
+- The vstbridge 0.0.4 release was reviewed, not executed on the user's Linux
+  workstation here. Test RNNoise and Supertone Clear with Wine 11.20.
+- Runtime Wine process crashes, audio xruns, plugin state snapshots, editor
+  resize semantics, and hot-swapping bridge backends need further validation.
+- The host's UI is Qt6/X11 (or XWayland via `QT_QPA_PLATFORM=xcb`); there is
+  no Wayland-native editor embedding.
+- The host-provided **Parameters** tab remains a supported workaround when
+  a plug-in's graphical editor ignores clicks, regardless of bridge.
+- vstbridge and yabridge are GPL-licensed third-party applications. They
+  remain external runtime dependencies; this repository does not embed
+  or redistribute their code.

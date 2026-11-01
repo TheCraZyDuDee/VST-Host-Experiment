@@ -144,10 +144,10 @@ if(BUILD_TESTING)
     target_compile_features(plugin-discovery-test PRIVATE cxx_std_20)
     add_test(NAME plugin-discovery-test COMMAND plugin-discovery-test)
 
-    add_executable(yabridge-manager-test tests/yabridge_manager_test.cpp)
-    target_include_directories(yabridge-manager-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-    target_compile_features(yabridge-manager-test PRIVATE cxx_std_20)
-    add_test(NAME yabridge-manager-test COMMAND yabridge-manager-test)
+    add_executable(windows-bridge-manager-test tests/windows_bridge_manager_test.cpp)
+    target_include_directories(windows-bridge-manager-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(windows-bridge-manager-test PRIVATE cxx_std_20)
+    add_test(NAME windows-bridge-manager-test COMMAND windows-bridge-manager-test)
 
     add_executable(processor-chain-test tests/processor_chain_test.cpp)
     target_include_directories(processor-chain-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -164,7 +164,7 @@ if(BUILD_TESTING)
     if(NOT MSVC)
         foreach(test_target IN ITEMS
                 ring-buffer-test parameter-event-queue-test audio-processor-test config-test
-                plugin-discovery-test yabridge-manager-test processor-chain-test
+                plugin-discovery-test windows-bridge-manager-test processor-chain-test
                 vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)
         endforeach()

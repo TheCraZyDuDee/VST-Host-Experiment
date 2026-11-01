@@ -5,7 +5,7 @@
 #include "gain_processor.hpp"
 #include "vst3_processor.hpp"
 #include "plugin_discovery.hpp"
-#include "yabridge_manager.hpp"
+#include "windows_bridge_manager.hpp"
 
 #include <pipewire/pipewire.h>
 
@@ -344,7 +344,8 @@ AudioDiagnostics PipeWireEngine::diagnostics() const noexcept {
 
 int PipeWireEngine::run() {
     std::string bridge_error;
-    if (!prepare_windows_vst3_plugins(impl_->options, bridge_error)) {
+    WindowsBridgeSelection selected_bridge;
+    if (!prepare_windows_vst3_plugins(impl_->options, bridge_error, &selected_bridge)) {
         impl_->last_error = bridge_error;
         std::fprintf(stderr, "Windows VST3 setup failed: %s\n", bridge_error.c_str());
         return -ENOENT;
@@ -383,9 +384,20 @@ int PipeWireEngine::run() {
                        request_shutdown, &impl_->state);
 
     auto plugin_paths = impl_->options.plugin_paths;
+    // Portable .vsthost and CLI chains may still reference old yabridge
+    // wrappers. After syncing a different backend, migrate only paths whose
+    // equivalent new wrapper actually exists. Never alter unrelated plugins.
+    if (!impl_->options.windows_plugin_directories.empty()) {
+        for (auto& path : plugin_paths)
+            path = detail::migrate_vst3_wrapper_path(path, selected_bridge);
+    }
     auto preloaded_plugins = impl_->options.preloaded_plugins;
     if (plugin_paths.empty() && !impl_->options.plugin_path.empty())
-        plugin_paths.push_back(impl_->options.plugin_path);
+        plugin_paths.push_back(
+            impl_->options.windows_plugin_directories.empty()
+                ? impl_->options.plugin_path
+                : detail::migrate_vst3_wrapper_path(
+                    impl_->options.plugin_path, selected_bridge));
     if (preloaded_plugins.empty() && impl_->options.preloaded_plugin)
         preloaded_plugins.push_back(impl_->options.preloaded_plugin);
     std::string scan_warning;

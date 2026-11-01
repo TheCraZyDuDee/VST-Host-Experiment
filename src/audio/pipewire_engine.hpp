@@ -1,6 +1,7 @@
 #pragma once
 
 #include "plugin_state.hpp"
+#include "stereo_level_meter.hpp"
 
 #include <cstdint>
 #include <cstddef>
@@ -17,6 +18,11 @@ struct AudioDiagnostics {
     std::uint64_t dropped_frames{};
     std::uint64_t stale_frames{};
     std::uint64_t underrun_frames{};
+};
+
+struct AudioLevelReadings {
+    StereoMeterReading input;
+    StereoMeterReading output;
 };
 
 struct PipeWireOptions {
@@ -81,6 +87,9 @@ public:
     [[nodiscard]] std::string plugin_state_warning() const;
     [[nodiscard]] std::string last_error() const;
     [[nodiscard]] AudioDiagnostics diagnostics() const noexcept;
+    // Lock-free snapshots from the capture/output callbacks. Samples are
+    // measured before effects and after output gain, respectively.
+    [[nodiscard]] AudioLevelReadings level_readings() const noexcept;
 
 private:
     struct Impl;

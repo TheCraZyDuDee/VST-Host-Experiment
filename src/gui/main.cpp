@@ -34,6 +34,7 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QProgressBar>
 #include <QScrollArea>
 #include <QSlider>
 #include <QTabWidget>
@@ -51,6 +52,7 @@
 #include <X11/Xlib.h>
 #endif
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -1071,6 +1073,35 @@ public:
         actions->addWidget(editorButton_);
         root->insertLayout(1, actions);
 
+        auto* levelPanel = new QGroupBox(tr("Audio levels (peak / RMS in dBFS)"), central);
+        auto* levelRow = new QHBoxLayout(levelPanel);
+        levelRow->setSpacing(8);
+        const auto addMeterGroup =
+            [levelPanel, levelRow, this](const QString& title,
+                                          std::array<QProgressBar*, 2>& bars) {
+                auto* group = new QGroupBox(title, levelPanel);
+                auto* column = new QVBoxLayout(group);
+                column->setContentsMargins(6, 6, 6, 6);
+                column->setSpacing(3);
+                for (int channel = 0; channel < 2; ++channel) {
+                    auto* meter = new QProgressBar(group);
+                    meter->setRange(0, 1000);
+                    meter->setValue(0);
+                    meter->setTextVisible(true);
+                    meter->setAlignment(Qt::AlignCenter);
+                    meter->setFormat(channel == 0 ? tr("L  —") : tr("R  —"));
+                    meter->setToolTip(tr(
+                        "Peak and smoothed RMS in dBFS. CLIP shows recent "
+                        "samples at or above 0 dBFS on this channel."));
+                    bars[static_cast<std::size_t>(channel)] = meter;
+                    column->addWidget(meter);
+                }
+                levelRow->addWidget(group, 1);
+            };
+        addMeterGroup(tr("Input"), inputMeterBars_);
+        addMeterGroup(tr("Output"), outputMeterBars_);
+        root->insertWidget(2, levelPanel);
+
         status_ = new QLabel(tr("Ready. Add effects to the chain or start without effects for direct microphone routing."), central);
         status_->setWordWrap(true);
         root->addWidget(status_);
@@ -1615,6 +1646,7 @@ private:
         options.windows_plugin_directories.clear();
 
         previousDiagnostics_ = {};
+        resetLevelMeters();
         engineReadyShown_ = false;
         engine_ = std::make_unique<vst_host::audio::PipeWireEngine>(std::move(options));
         engineFinished_.store(false, std::memory_order_release);
@@ -1637,6 +1669,7 @@ private:
         if (worker_.joinable()) worker_.join();
         const auto stateWarning = captureFinishedPluginStates();
         engine_.reset();
+        resetLevelMeters();
         startButton_->setEnabled(true);
         stopButton_->setEnabled(false);
         setEditingEnabled(true);
@@ -1784,6 +1817,77 @@ private:
         });
     }
 
+    void resetLevelMeters() {
+        previousInputFrames_ = 0;
+        previousOutputFrames_ = 0;
+        staleInputPolls_ = 0;
+        staleOutputPolls_ = 0;
+        previousInputClips_.fill(0);
+        previousOutputClips_.fill(0);
+        heldInputClips_.fill(0);
+        heldOutputClips_.fill(0);
+        for (const auto& pair : {inputMeterBars_, outputMeterBars_}) {
+            for (std::size_t channel = 0; channel < pair.size(); ++channel) {
+                pair[channel]->setValue(0);
+                pair[channel]->setFormat(channel == 0 ? tr("L  —") : tr("R  —"));
+            }
+        }
+    }
+
+    static QString meterDb(float amplitude) {
+        if (!std::isfinite(amplitude) || amplitude <= 0.000001F)
+            return QStringLiteral("−∞");
+        return QString::number(20.0 * std::log10(
+            static_cast<double>(amplitude)), 'f', 1);
+    }
+
+    void updateLevelPair(
+        const std::array<QProgressBar*, 2>& bars,
+        const vst_host::audio::StereoMeterReading& reading,
+        std::uint64_t& previousFrames,
+        int& stalePolls,
+        std::array<std::uint64_t, 2>& previousClips,
+        std::array<int, 2>& clipHold) {
+        // A disconnected/paused capture source must not leave its last
+        // nonzero meter value frozen indefinitely.
+        if (reading.observed_frames == previousFrames)
+            stalePolls = std::min(stalePolls + 1, 100);
+        else
+            stalePolls = 0;
+        previousFrames = reading.observed_frames;
+        const bool stale = reading.observed_frames == 0 || stalePolls >= 4;
+
+        const std::array<vst_host::audio::MeterChannelReading, 2> channels{
+            reading.left, reading.right};
+        for (std::size_t i = 0; i < channels.size(); ++i) {
+            const auto& channel = channels[i];
+            if (channel.clipped_frames > previousClips[i])
+                clipHold[i] = 5; // Show recent clipping for approximately 1 s.
+            else if (clipHold[i] > 0)
+                --clipHold[i];
+            previousClips[i] = channel.clipped_frames;
+
+            const float peak = stale ? 0.0F : channel.peak;
+            const float rms = stale ? 0.0F : channel.rms;
+            bars[i]->setValue(static_cast<int>(std::lround(
+                1000.0 * std::clamp(static_cast<double>(peak), 0.0, 1.0))));
+            bars[i]->setFormat(tr("%1  Peak %2  RMS %3%4")
+                .arg(i == 0 ? tr("L") : tr("R"))
+                .arg(meterDb(peak))
+                .arg(meterDb(rms))
+                .arg(clipHold[i] > 0 ? tr("  CLIP") : QString()));
+        }
+    }
+
+    void updateLevelMeters(const vst_host::audio::AudioLevelReadings& readings) {
+        updateLevelPair(inputMeterBars_, readings.input,
+                        previousInputFrames_, staleInputPolls_,
+                        previousInputClips_, heldInputClips_);
+        updateLevelPair(outputMeterBars_, readings.output,
+                        previousOutputFrames_, staleOutputPolls_,
+                        previousOutputClips_, heldOutputClips_);
+    }
+
     void pollEngine() {
         if (deviceScanPending_ && deviceScanFuture_.valid() &&
             deviceScanFuture_.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
@@ -1880,6 +1984,7 @@ private:
             if (worker_.joinable()) worker_.join();
             const auto stateWarning = captureFinishedPluginStates();
             engine_.reset();
+            resetLevelMeters();
             startButton_->setEnabled(true);
             stopButton_->setEnabled(false);
             editorButton_->setEnabled(false);
@@ -1894,6 +1999,7 @@ private:
             saveSettings();
             return;
         }
+        updateLevelMeters(engine_->level_readings());
         const auto stats = engine_->diagnostics();
         // Distinguish ever-increasing cumulative totals from new loss over the
         // most recent UI polling period (normally 200 ms).
@@ -1976,6 +2082,16 @@ private:
     QCheckBox* bypassSelectedEffect_{};
     QLabel* status_{};
     QLabel* diagnostics_{};
+    std::array<QProgressBar*, 2> inputMeterBars_{};
+    std::array<QProgressBar*, 2> outputMeterBars_{};
+    std::array<std::uint64_t, 2> previousInputClips_{};
+    std::array<std::uint64_t, 2> previousOutputClips_{};
+    std::array<int, 2> heldInputClips_{};
+    std::array<int, 2> heldOutputClips_{};
+    std::uint64_t previousInputFrames_{};
+    std::uint64_t previousOutputFrames_{};
+    int staleInputPolls_{};
+    int staleOutputPolls_{};
     QTimer* pollTimer_{};
     std::unique_ptr<vst_host::audio::PipeWireEngine> engine_;
     std::thread worker_;

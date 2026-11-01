@@ -57,5 +57,49 @@ int main() {
     // Stale queue trimming is not the same as a producer overflow.
     if (full.stale_frames() != 0 || buffer.dropped_frames() != 0) return 5;
 
+
+    // Exercise the actual circular-index wrap, not just a short queue.
+    // Fill almost the entire capacity, drain, then cross the array boundary
+    // with stereo samples of different signs to detect swapped channels.
+    StereoRingBuffer wrapped;
+    constexpr auto nearly_full = StereoRingBuffer::capacity_frames - 2;
+    std::vector<float> before_wrap(nearly_full * 2);
+    for (std::size_t i = 0; i < nearly_full; ++i) {
+        before_wrap[2 * i] = static_cast<float>(i + 1);
+        before_wrap[2 * i + 1] = -static_cast<float>(i + 1);
+    }
+    wrapped.push_interleaved(before_wrap.data(), nearly_full);
+    std::vector<float> drained(before_wrap.size());
+    wrapped.pop_interleaved(drained.data(), nearly_full);
+    if (drained != before_wrap || wrapped.underrun_frames() != 0 ||
+        wrapped.stale_frames() != 0) return 6;
+
+    const float crossing[] = {7.0F, -7.0F, 8.0F, -8.0F,
+                              9.0F, -9.0F, 10.0F, -10.0F};
+    wrapped.push_interleaved(crossing, 4);
+    float after_wrap[8]{};
+    wrapped.pop_interleaved(after_wrap, 4);
+    for (std::size_t i = 0; i < 8; ++i)
+        if (after_wrap[i] != crossing[i]) return 7;
+    if (wrapped.dropped_frames() != 0 ||
+        wrapped.stale_frames() != 0 ||
+        wrapped.underrun_frames() != 0) return 8;
+
+    // After a pinned microphone disconnect, old queued audio must not be
+    // replayed. Only fresh samples should survive a consumer-side discard.
+    StereoRingBuffer reconnect;
+    reconnect.push_interleaved(input, 3);
+    reconnect.discard_pending();
+    const float reconnected_input[] = {0.9F, -0.9F, 0.8F, -0.8F};
+    reconnect.push_interleaved(reconnected_input, 2);
+    float reconnected_output[6]{};
+    reconnect.pop_interleaved(reconnected_output, 3);
+    if (reconnected_output[0] != 0.9F || reconnected_output[1] != -0.9F ||
+        reconnected_output[2] != 0.8F || reconnected_output[3] != -0.8F ||
+        reconnected_output[4] != 0.0F || reconnected_output[5] != 0.0F ||
+        reconnect.underrun_frames() != 1 ||
+        reconnect.dropped_frames() != 0 || reconnect.stale_frames() != 0)
+        return 9;
+
     return 0;
 }

@@ -22,7 +22,7 @@ cmake --build build --target vst2-processor-test --parallel 1 --verbose
 - If a pinned microphone is disconnected, the virtual mic **intentionally outputs silence** until that same PipeWire `node.name` returns. A numeric node ID is not a stable replacement for a device name.
 - Make sure the consuming application uses the **virtual microphone** as its input. It must run inside the same PipeWire user session.
 - Try starting without plugins, then add effects one at a time. A bypassed effect remains loaded but does not process audio.
-- If output drops out, increase the latency buffer from 128 to 256/512/1024 frames and watch the GUI's dropped/underrun/stale frame counters. PipeWire controls actual graph latency; the setting is a request, not a guarantee.
+- If output drops out, increase the latency buffer from 128 to 256/512/1024 frames and watch the GUI's dropped/underrun/stale frame counters. **Input** peak/RMS indicates the selected microphone before effects; **Output** indicates the virtual microphone after processing and gain. If input moves but output is silent, bypass effects one by one to identify the stage. **CLIP** indicates a channel reached or exceeded 0 dBFS; reduce the relevant input/plugin gain. Meters display silence if capture stops for several polls and do not measure CPU load or end-to-end latency. PipeWire controls actual graph latency; the setting is a request, not a guarantee.
 
 ## Headless mode sounds different or uses more CPU
 

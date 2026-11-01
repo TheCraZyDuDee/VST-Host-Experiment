@@ -175,7 +175,7 @@ inline std::string vst3_plugin_source_identity(const std::string& bundle_path) {
 // bundles with similar names and preserve multiple intentional chain instances.
 inline std::string plugin_source_identity(const std::string& path) {
     return plugin_format(path) == PluginFormat::Vst2
-        ? vst2_plugin_source_identity(path) : plugin_source_identity(path);
+        ? vst2_plugin_source_identity(path) : vst3_plugin_source_identity(path);
 }
 
 inline bool preferable_vst3_path(const std::string& a, const std::string& b) {

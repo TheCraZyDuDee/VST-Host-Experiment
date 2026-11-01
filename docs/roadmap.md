@@ -1,50 +1,25 @@
 # Roadmap
 
-## Phase 0 — Foundation
-- [x] Establish goals and architectural constraints.
-- [x] Add a minimal CMake/C++20 scaffold.
-- [x] Add the first PipeWire capture/source implementation.
-- [x] Compile and test on Linux in GitHub Actions with PipeWire development packages (real-device testing remains a separate task).
-- [x] Add unit tests for the SPSC buffer and a CI build.
+This page tracks remaining engineering work, not a historical development diary. For supported workflows, start with the [README](../README.md) and [Getting started](getting-started.md).
 
-## Phase 1 — Audio routing proof of concept
-- [x] Add a capture stream and named virtual-source node.
-- [x] Add a fixed gain/bypass processing stage.
-- [ ] Verify microphone selection and source visibility on PipeWire/WirePlumber on target hardware.
-- [ ] Test mono microphones, channel negotiation, and device disconnect/reconnect.
-- [ ] Measure latency, CPU use, buffer underruns, and dropped frames.
-- [x] Expose lock-free ring-buffer underrun and dropped-frame counters to the GUI.
+## Implemented
 
-## Phase 2 — Processing graph
-- [x] Define a real-time-safe processor interface and route the gain stage through it.
-- [x] Support per-effect runtime bypass with atomic control flags and a regression test.
-- [ ] Support runtime output gain/bypass changes without restarting the engine.
-- [x] Add ordered processor chains, mono/stereo adaptation between VST3 stages, and cumulative plugin-latency reporting.
-- [x] Persist plugin chain order and host audio routing/gain/latency settings in the Qt UI.
-- [x] Add portable configuration import/export shared by GUI and CLI; run saved configurations headlessly.
-- [x] Implement serialized per-instance plugin component/controller state in desktop and portable configurations.
-- [ ] Validate plugin-state round trips and device settings on native and Wine/VST3 hardware.
+- PipeWire input → ordered VST effect chain → named virtual microphone, with an SDK-free headless mode.
+- Qt 6 plugin browser, search, device selection, drag-to-reorder chain, native editors, Host Controls, live per-effect bypass, and audio buffer diagnostics.
+- Native Linux VST3 and optional licensed VST2; Wine VST2/VST3 through vstbridge or yabridge; format labels and Windows directory filtering.
+- Pinned microphone reconnection without falling back to another input.
+- Per-instance plugin-state persistence, GUI settings, portable `.vsthost` files, and automated tests.
 
-## Phase 3 — Native plugins
-- [x] Evaluate the Steinberg VST3 SDK license and optional dependency strategy.
-- [x] Add an initial optional VST3 adapter and `--plugin PATH` support for one stereo audio effect.
-- [ ] Build with the SDK and validate load/process/unload against a real native Linux VST3 plugin.
-- [ ] Improve bus negotiation, plug-in failure reporting, state, bypass, and sample-rate/block-size changes.
-- [x] Add a multi-plugin VST3 chain in CLI and Qt UI, including ordering and selected-instance editor access.
-- [x] Add VST3 component and controller state persistence with offline snapshots.
-- [ ] Validate full-state restores on representative native and Wine VST3 plugins.
-- [ ] Evaluate VST2 support and distribution implications separately.
+## Priorities
 
-## Phase 4 — User interface
-- [x] Add an optional Qt 6 UI with VST3 editor hosting; headless build remains independent.
-- [x] Plugin chain editor, gain bypass, and engine status.
-- [x] PipeWire device enumeration/selection in the Qt frontend.
-- [x] Add selectable per-plugin bypass that can be changed while audio runs.
-- [ ] Add input/output meters and clipping indication.
-- [ ] Ensure the app remains usable headlessly.
+1. **Audio meters:** per-channel input/output peak/RMS and clipping indication, with bounded nonblocking transfer to the GUI.
+2. **Reliability:** better Wine bridge/plugin crash diagnostics, recovery paths, and device/session-manager edge cases.
+3. **Performance validation:** measure end-to-end latency, buffer behavior, CPU use, and plugin-induced latency on representative hardware.
+4. **Controls:** consider live output-gain adjustment and further parameter automation without disrupting the audio thread.
+5. **Compatibility:** expand testing across Linux distributions, plugins, and desktop environments; improve editor focus/resizing.
 
-## Phase 5 — Later research
-- [x] Add configurable plugin-directory scanning and discovery.
-- [x] Integrate optional Wine/vstbridge setup, yabridge fallback, and Windows VST3 wrapper loading; see [Windows VST3 bridge documentation](windows-vst3-bridge.md).
-- [ ] Add bridge lifecycle monitoring and failure isolation.
-- [ ] Document unsupported plugins and failure behavior.
+## Out of scope for now
+
+MIDI instruments, dedicated multichannel/sidechain routing, and fully native Wayland plugin embedding are not supported. VST2 licensing restrictions remain in force; the SDK is not distributed with this project.
+
+See [Architecture](architecture.md) for implementation boundaries and [Troubleshooting](troubleshooting.md) for current limitations.

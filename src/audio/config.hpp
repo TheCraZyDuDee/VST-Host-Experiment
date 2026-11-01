@@ -60,7 +60,7 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
             parsed.bypass = value == "true";
         } else if (key == "input" || key == "output_name" || key == "plugin" || key == "plugin_directory" || key == "windows_plugin_directory") {
             std::string value;
-            if (!(value_stream >> std::quoted(value)) || value.empty()) {
+            if (!(value_stream >> std::quoted(value)) || (value.empty() && key != "input")) {
                 error = "Expected a non-empty quoted string at line " + std::to_string(line_number);
                 return false;
             }

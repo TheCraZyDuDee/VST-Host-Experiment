@@ -12,6 +12,7 @@ class Vst3Processor;
 
 struct AudioDiagnostics {
     std::uint64_t dropped_frames{};
+    std::uint64_t stale_frames{};
     std::uint64_t underrun_frames{};
 };
 

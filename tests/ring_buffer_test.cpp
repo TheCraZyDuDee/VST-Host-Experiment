@@ -50,9 +50,12 @@ int main() {
     backlog.pop_interleaved(recent_output, 2, 1);
     if (recent_output[0] != 4.0F || recent_output[1] != -4.0F ||
         recent_output[2] != 5.0F || recent_output[3] != -5.0F ||
-        backlog.dropped_frames() != 3) {
+        backlog.stale_frames() != 3 || backlog.dropped_frames() != 0) {
         return 4;
     }
+
+    // Stale queue trimming is not the same as a producer overflow.
+    if (full.stale_frames() != 0 || buffer.dropped_frames() != 0) return 5;
 
     return 0;
 }

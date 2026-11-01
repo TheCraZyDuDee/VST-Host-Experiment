@@ -362,12 +362,17 @@ AudioDiagnostics PipeWireEngine::diagnostics() const noexcept {
 
 int PipeWireEngine::run() {
     std::string bridge_error;
+    std::string bridge_warning;
     WindowsBridgeSelection selected_bridge;
-    if (!prepare_windows_vst3_plugins(impl_->options, bridge_error, &selected_bridge)) {
+    if (!prepare_windows_vst3_plugins(
+            impl_->options, bridge_error, &selected_bridge, &bridge_warning)) {
         impl_->last_error = bridge_error;
         std::fprintf(stderr, "Windows VST3 setup failed: %s\n", bridge_error.c_str());
         return -ENOENT;
     }
+
+    if (!bridge_warning.empty())
+        std::fprintf(stderr, "%s", bridge_warning.c_str());
 
     int argc = 0;
     char* arguments[] = {nullptr};

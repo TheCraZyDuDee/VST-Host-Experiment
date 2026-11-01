@@ -18,8 +18,9 @@ This changes the **bridge backend**, not the `.vsthost` file format: the
 ## Why vstbridge
 
 - vstbridge is an actively updated yabridge fork. Version **0.0.4**, released
-  October 28, 2026, contains compatibility changes for recent Wine versions,
-  including Wine 11.20, and multi-monitor editor input fixes.
+  October 28, 2026, contains compatibility changes for recent Wine versions
+  and multi-monitor editor input fixes. The 0.0.4 notes mention Wine 11.20
+  on ARM, but do not establish that the user's x86_64 plugin combination works.
 - It specifically implements a Windows-side XEmbed coordinate correction
   for the failure in which a VST3 GUI renders but ignores mouse input.
 - `vstbridgectl` supports the same `add`, `sync`, and `status` commands

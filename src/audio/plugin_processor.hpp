@@ -28,6 +28,7 @@ public:
                              std::string& error) = 0;
     virtual void close_editor() noexcept = 0;
     virtual void idle_editor() noexcept {}
+    [[nodiscard]] virtual bool has_native_editor() const noexcept { return true; }
     [[nodiscard]] virtual std::vector<ParameterInfo> editor_parameters() const = 0;
     virtual bool set_editor_parameter(std::uint32_t id, double normalized_value) = 0;
     [[nodiscard]] virtual const std::string& plugin_path() const noexcept = 0;

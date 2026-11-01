@@ -135,6 +135,60 @@ This behavior depends on a WirePlumber linking policy that honors
 or outdated WirePlumber configurations may behave differently and require
 separate testing.
 
+## Optional VST2 effects (Linux and Windows via Wine)
+
+The host can now process a mixed ordered chain of **VST2** and **VST3**
+effects. Linux VST2 effects are loadable shared libraries (`.so` files).
+Windows VST2 effects are `.dll` files which **vstbridge or yabridge**
+convert to native Linux VST2 `.so` wrappers. vstbridge typically places
+them under `~/.vst/vstbridge/`; VST3 wrappers remain under
+`~/.vst3/vstbridge/`. The GUI shows `(VST2)` or `(VST3)`, followed by
+`(WINE)` for bridged effects, in **one plugin library and chain**.
+
+**VST2 hosting is explicitly opt-in because of its legacy licensing.**
+Steinberg retired the VST2 SDK in October 2018; new VST2 host
+distribution without the required pre-existing agreement is not allowed.
+The VST2 SDK is *not* included, downloaded, or copied into this repository.
+Only build or distribute a VST2-enabled executable where your legal rights
+permit it. If you have a lawfully licensed local VST2.4 SDK containing
+`aeffectx.h`, enable it with:
+
+```sh
+cmake -S . -B build-vst2-vst3 -DVST_HOST_ENABLE_VST2=ON \
+  -DVST2_SDK_ROOT=/path/to/your/licensed/vst2sdk \
+  -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
+cmake --build build-vst2-vst3 -j
+QT_QPA_PLATFORM=xcb ./build-vst2-vst3/vst-host-gui
+```
+
+The default CMake configuration keeps VST2 disabled. If VST2 is disabled,
+`.so` effects are not advertised as loadable in the GUI scan, and trying
+to load one explicitly reports the missing VST2 support. The VST3-only
+build is unaffected.
+
+When VST2 is enabled, **Add VST2 .so…** picks a native Linux VST2 library;
+scanning a Linux plugin directory also finds `.so` effects while excluding
+`.so` files inside VST3 bundles. Add a Windows VST2 `.dll` directory via
+**Add Windows directory…**; syncing generates `.so` wrappers which appear
+in the same library as the VST3 bundles. Centralized and inline VST2 bridge
+wrappers are supported. Load the generated `.so`, not the Windows `.dll`,
+into the host chain. The headless CLI also supports `--plugin /path/plugin.so`.
+
+The VST2 adapter handles 32-bit floating-point replacing effects with mono
+or stereo inputs/outputs, a basic embedded editor through X11 and
+host-parameter sliders. Editor behavior depends on the plugin and Wine
+bridge; classic VST2 plugins may require periodic `effEditIdle` callbacks.
+Plugin state is saved using VST2 bank chunks when supported, otherwise
+a bounded parameter snapshot. Saved states follow each plugin instance
+individually through order changes and portable `.vsthost` files.
+
+**Limitations:** VST2 synthesizers without audio input, sidechains, more
+than two audio channels, 32-bit native Linux .so modules inside a 64-bit
+process, plugin-specific offline processing, and reliable GUI embedding
+on native Wayland are not supported. Run real desktop and Wine regression
+tests before relying on a VST2 plugin in production. Automated CI without
+the legacy SDK exercises the VST2-disabled path and format discovery only.
+
 ## Per-plugin VST3 settings and preset persistence
 
 After you change a VST3 effect (including an effect hosted through

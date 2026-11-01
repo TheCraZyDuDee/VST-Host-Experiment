@@ -11,14 +11,7 @@
 #include <vector>
 
 #if defined(VST_HOST_ENABLE_VST2)
-// Some original VST2.4 aeffect.h distributions expand VSTCALLBACK to
-// __cdecl unconditionally, including on Linux. GCC/Clang on Linux do not
-// define that MSVC spelling; the platform's default C calling convention is
-// already correct for the VST2 ABI. Keep this compatibility shim local to
-// the legacy SDK translation unit instead of modifying the user's SDK.
-#if defined(__linux__) && (defined(__GNUC__) || defined(__clang__)) && !defined(__cdecl)
-#define __cdecl
-#endif
+#include "vst2_legacy_abi_compat.hpp" // Must precede the legacy SDK headers.
 #include <aeffectx.h> // User-supplied legacy SDK, never redistributed.
 #include <dlfcn.h>
 #endif

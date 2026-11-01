@@ -128,10 +128,11 @@ separate possible causes:
    install DXVK into the **same Wine prefix used by that plugin**. A common
    command is `WINEPREFIX=/path/to/plugin-prefix winetricks -q dxvk`.
    Back up the prefix first; do not install DXVK system-wide for every Wine app.
-2. **X11 exposure/invalidation behavior.** Inside the plugin editor, enable
-   **Force plugin GUI refresh (experimental)** to request an X11 repaint at
-   20 Hz while the **Plugin UI** tab is visible. The checkbox defaults to
-   **off**, and its setting is saved across runs. It can cause flickering or
+2. **X11 exposure/invalidation behavior.** Inside the plugin editor,
+   first click **Refresh now** while the **Plugin UI** tab is visible. If
+   that refreshes the sliders, enable **Force plugin GUI refresh
+   (experimental)** to request X11 repaints at 20 Hz. The checkbox defaults
+   to **off**, and its setting is saved across runs. It can cause flickering or
    increased CPU usage, and may not help when Wine's graphics backend fails
    to issue Win32 repaint operations. Turn it off if ineffective.
 

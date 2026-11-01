@@ -173,6 +173,11 @@ if(BUILD_TESTING)
     target_compile_features(config-test PRIVATE cxx_std_20)
     add_test(NAME config-test COMMAND config-test)
 
+    add_executable(headless-config-parity-test tests/headless_config_parity_test.cpp)
+    target_include_directories(headless-config-parity-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(headless-config-parity-test PRIVATE cxx_std_20)
+    add_test(NAME headless-config-parity-test COMMAND headless-config-parity-test)
+
     add_executable(plugin-discovery-test tests/plugin_discovery_test.cpp)
     target_include_directories(plugin-discovery-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(plugin-discovery-test PRIVATE cxx_std_20)
@@ -225,7 +230,7 @@ if(BUILD_TESTING)
     if(NOT MSVC)
         foreach(test_target IN ITEMS
                 ring-buffer-test capture-target-policy-test plugin-state-test parameter-event-queue-test audio-processor-test config-test
-                plugin-discovery-test windows-bridge-manager-test processor-chain-test
+                headless-config-parity-test plugin-discovery-test windows-bridge-manager-test processor-chain-test
                 windows-plugin-scope-test vst2-audio-layout-test vst2-legacy-abi-compat-test vst2-processor-test vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)
         endforeach()

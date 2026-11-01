@@ -135,6 +135,46 @@ This behavior depends on a WirePlumber linking policy that honors
 or outdated WirePlumber configurations may behave differently and require
 separate testing.
 
+## Per-plugin VST3 settings and preset persistence
+
+After you change a VST3 effect (including an effect hosted through
+vstbridge/Wine), stop audio normally with **Stop audio**. The host now
+serializes the effect's **component/DSP state** and, when the plugin supports
+it, its **editor/controller state**. Each instance in the processing chain
+gets its own snapshot, even when you load two copies of the same effect.
+
+On the next start, the host restores these states **before enabling audio
+processing**. Snapshots are saved in the Qt desktop settings after each
+orderly shutdown; the active-chain label marks effects with
+`[saved settings]`. Dragging effects to reorder them keeps each state with
+its own chain entry. **Clear saved settings for selected effect** resets that
+instance to the plugin's defaults on its next start.
+
+To create a portable setup containing current plugin settings: stop audio
+first, then use **Save configuration…**. The `.vsthost` format now accepts
+`plugin_component_state = "…"` and `plugin_controller_state = "…"`
+(base64 binary snapshots) after each corresponding `plugin = "..."` entry.
+Older `.vsthost` files with only plugin paths and bypass values remain
+compatible. Loading a portable configuration restores its per-instance
+snapshots; the CLI also loads them with `--config`. Saving config from the
+CLI **before** processing cannot capture subsequent changes made during
+that session, but will preserve any snapshots already loaded.
+
+**The VST3 specification has separate component and controller state.**
+The host captures snapshots only after PipeWire processing callbacks have
+stopped, never on the real-time audio thread. If a plugin rejects or cannot
+provide a snapshot, the GUI reports a warning and preserves any previously
+saved state for that instance. An incompatible saved snapshot can prevent
+that plugin from starting; use **Clear saved settings** to load it with
+defaults again.
+
+Snapshots are limited to 16 MiB per component and per controller. Some
+plugins store licensing, paths, or personally identifying configuration in
+their state. Base64 is **not encryption**; treat exported `.vsthost` files as
+potentially sensitive and avoid publishing them publicly. Snapshot support
+must still be validated against real native and Wine VST3 plugins, especially
+ones with extensive presets or asynchronous editor state.
+
 ## Live per-effect bypass
 
 Select an effect in the **Processing chain** and check **Bypass selected

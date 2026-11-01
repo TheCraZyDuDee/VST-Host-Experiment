@@ -31,7 +31,8 @@ inline constexpr std::string_view bridge_name(WindowsBridgeBackend backend) noex
 struct WindowsBridgeSelection {
     WindowsBridgeBackend backend{WindowsBridgeBackend::Vstbridge};
     std::string executable;
-    std::filesystem::path wrapper_directory;
+    std::filesystem::path wrapper_directory; // VST3
+    std::filesystem::path vst2_wrapper_directory;
 };
 
 namespace detail {
@@ -123,6 +124,15 @@ inline std::string parse_vst3_location(const std::string& status_output) {
         position = begin;
     }
     return {};
+}
+
+inline std::string parse_vst2_location(const std::string& output) {
+    constexpr std::string_view prefix = "VST2 location: '";
+    const auto start = output.find(prefix);
+    if (start == std::string::npos) return {};
+    const auto begin = start + prefix.size();
+    const auto end = output.find('\'', begin);
+    return end == std::string::npos ? std::string{} : output.substr(begin, end - begin);
 }
 
 // A bridge tool maintains a GLOBAL set of plugin search roots, shared by all
@@ -242,6 +252,24 @@ inline std::string migrate_vst3_wrapper_path(const std::string& path,
 
 // Register and sync Windows VST3 plugins before loading. vstbridge is preferred
 // when installed. yabridge is a fallback so existing setups keep working.
+// VST2 plugins are bridged as .so files in ~/.vst/<backend>/. VST3 bundles
+// are exposed in ~/.vst3/<backend>/. Both share the same add/sync process.
+inline std::string migrate_vst2_wrapper_path(const std::string& path,
+                                              const WindowsBridgeSelection& selected) {
+    for (const std::string_view marker : {std::string_view("/.vst/vstbridge/"),
+                                          std::string_view("/.vst/yabridge/")}) {
+        const auto position = path.find(marker);
+        if (position == std::string::npos || selected.vst2_wrapper_directory.empty())
+            continue;
+        const auto relative = path.substr(position + marker.size());
+        const auto candidate = selected.vst2_wrapper_directory / relative;
+        std::error_code ec;
+        if (std::filesystem::is_regular_file(candidate, ec) && !ec)
+            return candidate.string();
+    }
+    return path;
+}
+
 // Both tools have the same add/sync/status CLI and output a native VST3 wrapper.
 inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& error,
                                          WindowsBridgeSelection* selected = nullptr,
@@ -347,27 +375,47 @@ inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& 
 
     std::string status_output;
     std::string status_error;
-    std::string wrapper_directory;
-    if (detail::run_bridge_command({bridge->executable, "status"}, status_output, status_error))
+    std::string wrapper_directory, vst2_directory;
+    if (detail::run_bridge_command({bridge->executable, "status"}, status_output, status_error)) {
         wrapper_directory = detail::parse_vst3_location(status_output);
-
-    if (wrapper_directory.empty()) {
-        if (const char* home = std::getenv("HOME"); home && *home)
-            wrapper_directory = (std::filesystem::path(home) / ".vst3" /
-                                 bridge_label).string();
+        vst2_directory = detail::parse_vst2_location(status_output);
+    }
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        if (wrapper_directory.empty())
+            wrapper_directory = (std::filesystem::path(home) / ".vst3" / bridge_label).string();
+        if (vst2_directory.empty())
+            vst2_directory = (std::filesystem::path(home) / ".vst" / bridge_label).string();
     }
     std::error_code wrapper_error;
-    if (wrapper_directory.empty() ||
-        !std::filesystem::is_directory(wrapper_directory, wrapper_error) || wrapper_error) {
-        error = bridge_label +
-                " synchronized, but its generated VST3 wrapper directory could not be located.";
+    const bool has_vst3 = !wrapper_directory.empty() &&
+        std::filesystem::is_directory(wrapper_directory, wrapper_error) && !wrapper_error;
+    wrapper_error.clear();
+    const bool has_vst2 = !vst2_directory.empty() &&
+        std::filesystem::is_directory(vst2_directory, wrapper_error) && !wrapper_error;
+#if defined(VST_HOST_ENABLE_VST2)
+    if (!has_vst2 && !has_vst3) {
+#else
+    if (!has_vst3) {
+#endif
+        error = bridge_label + " synchronized, but no supported plugin wrapper "
+                "directory was found under ~/.vst3 or ~/.vst.";
         if (!status_error.empty()) error += "\n" + status_error;
         return false;
     }
-    bridge->wrapper_directory = wrapper_directory;
-    if (std::find(options.plugin_directories.begin(), options.plugin_directories.end(),
-                  wrapper_directory) == options.plugin_directories.end())
-        options.plugin_directories.push_back(wrapper_directory);
+    if (has_vst3) {
+        bridge->wrapper_directory = wrapper_directory;
+        if (std::find(options.plugin_directories.begin(), options.plugin_directories.end(),
+                      wrapper_directory) == options.plugin_directories.end())
+            options.plugin_directories.push_back(wrapper_directory);
+    }
+#if defined(VST_HOST_ENABLE_VST2)
+    if (has_vst2) {
+        bridge->vst2_wrapper_directory = vst2_directory;
+        if (std::find(options.plugin_directories.begin(), options.plugin_directories.end(),
+                      vst2_directory) == options.plugin_directories.end())
+            options.plugin_directories.push_back(vst2_directory);
+    }
+#endif
     if (selected) *selected = *bridge;
     return true;
 }

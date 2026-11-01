@@ -98,21 +98,21 @@ int main() {
         return !vst_host::audio::load_config(path, unchanged, error) &&
                !error.empty() && unchanged.output_name == "before failed load";
     };
-    assert(rejects("gain = 1.5 unexpected\\n"));
-    assert(rejects("latency_frames = 256 trailing\\n"));
-    assert(rejects("bypass = true trailing\\n"));
-    assert(rejects("plugin = /unquoted/plugin.vst3\\n"));
-    assert(rejects("plugin = \\"effect.vst3\\"\\nplugin_component_state = Zg==\\n"));
-    assert(rejects("plugin = \\"effect.vst3\\"\\nplugin_bypassed = true\\nplugin_bypassed = false\\n"));
+    assert(rejects("gain = 1.5 unexpected\n"));
+    assert(rejects("latency_frames = 256 trailing\n"));
+    assert(rejects("bypass = true trailing\n"));
+    assert(rejects("plugin = /unquoted/plugin.vst3\n"));
+    assert(rejects("plugin = \"effect.vst3\"\nplugin_component_state = Zg==\n"));
+    assert(rejects("plugin = \"effect.vst3\"\nplugin_bypassed = true\nplugin_bypassed = false\n"));
 
     // Extra whitespace is valid and older configurations remain supported.
     {
         std::ofstream valid(path, std::ios::trunc);
-        valid << "gain = 1.5   \\n"
-                 "latency_frames = 256  \\n"
-                 "bypass = true   \\n"
-                 "plugin = \\"effect.vst3\\"   \\n"
-                 "plugin_bypassed = true   \\n";
+        valid << "gain = 1.5   \n"
+                 "latency_frames = 256  \n"
+                 "bypass = true   \n"
+                 "plugin = \"effect.vst3\"   \n"
+                 "plugin_bypassed = true   \n";
     }
     assert(vst_host::audio::load_config(path, restored, error));
     assert(restored.gain == 1.5F && restored.latency_frames == 256);

@@ -10,7 +10,7 @@ uninstall=false
 
 usage() {
     cat <<'HELP'
-Usage: ./scripts/install-user.sh [--build-dir DIR] [--prefix DIR] [--no-build] [--uninstall]
+Usage: bash scripts/install-user.sh [--build-dir DIR] [--prefix DIR] [--no-build] [--uninstall]
 
 Installs into ~/.local by default (no root), including a desktop launcher.
 Existing CMake build settings (including optional VST2 SDK paths) are reused.

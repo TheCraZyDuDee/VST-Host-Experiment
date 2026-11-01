@@ -472,13 +472,20 @@ int PipeWireEngine::run() {
     std::string bridge_error;
     std::string bridge_warning;
     WindowsBridgeSelection selected_bridge;
-    if (!prepare_windows_vst3_plugins(
-            impl_->options, bridge_error, &selected_bridge, &bridge_warning)) {
-        impl_->last_error = bridge_error;
-        std::fprintf(stderr, "Windows VST3 setup failed: %s\n", bridge_error.c_str());
-        return -ENOENT;
+    if (!windowsAutoLoadRoots.empty()) {
+        // GUI startup does not sync bridges: its selected chain references
+        // already-prepared wrappers. Headless --config must behave the same.
+        // Only an explicit --windows-plugin-dir enables global bridge sync.
+        auto bridge_options = impl_->options;
+        bridge_options.windows_plugin_directories = windowsAutoLoadRoots;
+        if (!prepare_windows_vst3_plugins(
+                bridge_options, bridge_error, &selected_bridge, &bridge_warning)) {
+            impl_->last_error = bridge_error;
+            std::fprintf(stderr, "Windows plugin setup failed: %s\n",
+                         bridge_error.c_str());
+            return -ENOENT;
+        }
     }
-
     if (!bridge_warning.empty())
         std::fprintf(stderr, "%s", bridge_warning.c_str());
 
@@ -526,7 +533,7 @@ int PipeWireEngine::run() {
     // Portable .vsthost and CLI chains may still reference old yabridge
     // wrappers. After syncing a different backend, migrate only paths whose
     // equivalent new wrapper actually exists. Never alter unrelated plugins.
-    if (!impl_->options.windows_plugin_directories.empty()) {
+    if (!windowsAutoLoadRoots.empty()) {
         for (auto& path : plugin_paths)
             path = plugin_format(path) == PluginFormat::Vst2
                 ? migrate_vst2_wrapper_path(path, selected_bridge)
@@ -535,7 +542,7 @@ int PipeWireEngine::run() {
     auto preloaded_plugins = impl_->options.preloaded_plugins;
     if (plugin_paths.empty() && !impl_->options.plugin_path.empty())
         plugin_paths.push_back(
-            impl_->options.windows_plugin_directories.empty()
+            windowsAutoLoadRoots.empty()
                 ? impl_->options.plugin_path
                 : (plugin_format(impl_->options.plugin_path) == PluginFormat::Vst2
                     ? migrate_vst2_wrapper_path(

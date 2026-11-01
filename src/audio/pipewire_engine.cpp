@@ -234,6 +234,8 @@ struct PipeWireEngine::Impl {
     PipeWireOptions options;
     EngineState state;
     std::string last_error;
+    std::vector<PluginState> plugin_snapshots;
+    std::string state_warning;
 
     int fail(std::string message, int result) {
         last_error = std::move(message);
@@ -429,6 +431,15 @@ std::size_t PipeWireEngine::plugin_count() const noexcept {
         ? impl_->state.plugin_chain.size() : 0;
 }
 
+std::vector<PluginState> PipeWireEngine::saved_plugin_states() const {
+    // The caller must first join the thread running PipeWireEngine::run().
+    return impl_ ? impl_->plugin_snapshots : std::vector<PluginState>{};
+}
+
+std::string PipeWireEngine::plugin_state_warning() const {
+    return impl_ ? impl_->state_warning : std::string{};
+}
+
 std::string PipeWireEngine::plugin_path(std::size_t index) const {
     if (!impl_ || !impl_->published_plugin.load(std::memory_order_acquire) ||
         index >= impl_->state.plugin_paths.size()) return {};
@@ -547,6 +558,15 @@ int PipeWireEngine::run() {
                 std::to_string(index + 1) + " ('" + plugin_paths[index] +
                 "'): " + plugin_error, -EINVAL);
         }
+        if (index < impl_->options.plugin_states.size() &&
+            !impl_->options.plugin_states[index].empty() &&
+            !plugin->restore_plugin_state(impl_->options.plugin_states[index], plugin_error)) {
+            return impl_->fail("Could not restore saved state of VST3 plugin " +
+                std::to_string(index + 1) + " ('" + plugin_paths[index] +
+                "'): " + plugin_error +
+                ". Clear the saved state for this effect if its version has changed.",
+                -EINVAL);
+        }
         impl_->state.processor_chain.add(*plugin);
         if (index < impl_->options.plugin_bypassed.size())
             (void)impl_->state.processor_chain.set_bypassed(
@@ -591,6 +611,30 @@ int PipeWireEngine::run() {
         impl_->published_running.store(true, std::memory_order_release);
         pw_main_loop_run(impl_->state.loop);
         impl_->published_running.store(false, std::memory_order_release);
+
+        // Stop realtime callbacks before calling VST3 getState(), which may
+        // allocate memory, access files, and query Wine bridge processes.
+        // The GUI closes the editor before requesting shutdown.
+        if (impl_->state.capture_stream)
+            (void)pw_stream_disconnect(impl_->state.capture_stream);
+        if (impl_->state.source_stream)
+            (void)pw_stream_disconnect(impl_->state.source_stream);
+
+        impl_->plugin_snapshots = impl_->options.plugin_states;
+        impl_->plugin_snapshots.resize(impl_->state.plugin_chain.size());
+        for (std::size_t index = 0; index < impl_->state.plugin_chain.size(); ++index) {
+            PluginState snapshot;
+            std::string state_error;
+            if (impl_->state.plugin_chain[index]->snapshot_plugin_state(snapshot, state_error)) {
+                impl_->plugin_snapshots[index] = std::move(snapshot);
+            } else {
+                impl_->state_warning += "Could not save state for " +
+                    impl_->state.plugin_paths[index] + ": " + state_error + "\n";
+            }
+        }
+        if (!impl_->state_warning.empty())
+            std::fprintf(stderr, "%s", impl_->state_warning.c_str());
+
         result = impl_->state.setup_error;
         if (result != 0) {
             impl_->last_error = impl_->state.setup_error_message.empty()

@@ -2637,6 +2637,24 @@ int main(int argc, char** argv) {
                   "external-editor launcher awaits a loaded plugin.");
         return 0;
     }
+    if (app.arguments().contains(QStringLiteral("--check-profile-settings"))) {
+        // UI smoke check without starting the microphone: the compact
+        // selector and application menu must exist in both Qt platforms.
+        MainWindow check;
+        check.show();
+        QApplication::processEvents();
+        auto* selector = check.findChild<QComboBox*>(
+            QStringLiteral("profileSelector"));
+        auto* menuButton = check.findChild<QToolButton*>(
+            QStringLiteral("appMenuButton"));
+        if (!selector || selector->count() < 1 || !menuButton ||
+            !menuButton->menu() || menuButton->menu()->actions().size() < 9) {
+            std::fprintf(stderr, "Profile/settings menu smoke test failed.\n");
+            return 2;
+        }
+        std::puts("Profile selector and application menu created successfully.");
+        return 0;
+    }
     const bool launchedAtLogin =
         app.arguments().contains(QStringLiteral("--autostart"));
     if (launchedAtLogin) {

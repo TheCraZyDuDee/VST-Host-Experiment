@@ -166,6 +166,16 @@ The default CMake configuration keeps VST2 disabled. If VST2 is disabled,
 to load one explicitly reports the missing VST2 support. The VST3-only
 build is unaffected.
 
+**Legacy SDK compile compatibility:** Some unmodified VST2.4 SDK releases
+define `VSTCALLBACK` as the MSVC keyword `__cdecl` even when compiling on
+Linux. GCC/Clang do not recognize that keyword natively, producing errors
+in `aeffect.h` such as `expected ')' before '*'` and follow-up errors
+about missing `AEffect::dispatcher`. The host provides a compatibility
+definition before including `aeffectx.h` on Linux; do **not** modify the
+licensed SDK headers. If you encountered this issue, pull the latest
+PR #21 branch and rebuild the `vst2-processor-test` target before
+attempting the full GUI build.
+
 When VST2 is enabled, **Add VST2 .so…** picks a native Linux VST2 library;
 scanning a Linux plugin directory also finds `.so` effects while excluding
 `.so` files inside VST3 bundles. Add a Windows VST2 `.dll` directory via

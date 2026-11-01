@@ -147,6 +147,22 @@ public:
         XFlush(display_);
     }
 
+    // Experimental workaround for Wine editors that process mouse input but
+    // only repaint after a tab switch or their window is reopened. An X11
+    // Expose event asks the client to redraw without remapping the window.
+    // Since XClearArea can briefly clear pixels and consumes resources, it is
+    // only used after the user explicitly opts into periodic refreshes.
+    void requestRepaint() {
+        if (!valid() || children_.empty()) return;
+        const Window editor = children_.front();
+        XWindowAttributes attrs{};
+        if (!XGetWindowAttributes(display_, editor, &attrs) ||
+            attrs.map_state != IsViewable || attrs.c_class != InputOutput)
+            return;
+        XClearArea(display_, editor, 0, 0, 0, 0, True);
+        XFlush(display_);
+    }
+
     void resizeTo(int width, int height) {
         lastWidth_ = std::max(1, width);
         lastHeight_ = std::max(1, height);
@@ -394,12 +410,40 @@ public:
         parameterScroll_->setWidgetResizable(true);
         tabs_->addTab(parameterScroll_, tr("Parameters (host controls)"));
         layout->addWidget(tabs_);
+        auto* redrawRow = new QHBoxLayout();
+        forceRedraw_ = new QCheckBox(tr("Force plugin GUI refresh (experimental)"), this);
+        forceRedraw_->setToolTip(
+            tr("Request a native X11 repaint 20 times per second when the plugin UI tab "
+               "is visible. May help Wine editors that only update after tab switching. "
+               "Can increase CPU usage or cause flicker. Disable if ineffective."));
+        redrawRow->addWidget(forceRedraw_);
+        redrawRow->addStretch();
+        layout->addLayout(redrawRow);
+        redrawTimer_ = new QTimer(this);
+        redrawTimer_->setInterval(50);
+        connect(redrawTimer_, &QTimer::timeout, this, [this] {
+            if (attached_ && xembed_ && isVisible() && !isMinimized() &&
+                tabs_->currentIndex() == 0)
+                xembed_->requestRepaint();
+        });
+        connect(forceRedraw_, &QCheckBox::toggled, this, [this](bool enabled) {
+            QSettings settings(QStringLiteral("VSTHostExperiment"),
+                               QStringLiteral("VSTHostExperiment"));
+            settings.setValue(QStringLiteral("editor/forceRedraw"), enabled);
+            if (enabled && attached_) redrawTimer_->start();
+            else redrawTimer_->stop();
+        });
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        forceRedraw_->setChecked(settings.value(
+            QStringLiteral("editor/forceRedraw"), false).toBool());
         resize(560, 400);
     }
 
     ~PluginEditorDialog() override { detachEditor(); }
 
     void detachEditor() {
+        if (redrawTimer_) redrawTimer_->stop();
         // Discard old controls before releasing the editor controller. Their
         // valueChanged handlers must not call a destroyed controller.
         if (parameterScroll_) delete parameterScroll_->takeWidget();
@@ -548,6 +592,7 @@ public:
         xembed_->setActive(isActiveWindow());
         xembed_->focusPlugin();
         rebuildParameterPanel();
+        if (forceRedraw_ && forceRedraw_->isChecked()) redrawTimer_->start();
         return true;
     }
 
@@ -559,6 +604,8 @@ private:
     QWidget* surface_{};
     QTabWidget* tabs_{};
     QScrollArea* parameterScroll_{};
+    QCheckBox* forceRedraw_{};
+    QTimer* redrawTimer_{};
     std::unique_ptr<XEmbedSurface> xembed_;
     bool attached_{false};
 };

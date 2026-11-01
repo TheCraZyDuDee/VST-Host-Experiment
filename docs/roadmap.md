@@ -22,7 +22,8 @@
 - [x] Add ordered processor chains, mono/stereo adaptation between VST3 stages, and cumulative plugin-latency reporting.
 - [x] Persist plugin chain order and host audio routing/gain/latency settings in the Qt UI.
 - [x] Add portable configuration import/export shared by GUI and CLI; run saved configurations headlessly.
-- [ ] Add persisted plugin-internal state and device settings.
+- [x] Implement serialized per-instance plugin component/controller state in desktop and portable configurations.
+- [ ] Validate plugin-state round trips and device settings on native and Wine/VST3 hardware.
 
 ## Phase 3 — Native plugins
 - [x] Evaluate the Steinberg VST3 SDK license and optional dependency strategy.
@@ -30,7 +31,8 @@
 - [ ] Build with the SDK and validate load/process/unload against a real native Linux VST3 plugin.
 - [ ] Improve bus negotiation, plug-in failure reporting, state, bypass, and sample-rate/block-size changes.
 - [x] Add a multi-plugin VST3 chain in CLI and Qt UI, including ordering and selected-instance editor access.
-- [ ] Add parameter/state persistence.
+- [x] Add VST3 component and controller state persistence with offline snapshots.
+- [ ] Validate full-state restores on representative native and Wine VST3 plugins.
 - [ ] Evaluate VST2 support and distribution implications separately.
 
 ## Phase 4 — User interface

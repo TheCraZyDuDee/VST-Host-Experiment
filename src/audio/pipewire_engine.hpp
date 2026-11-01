@@ -1,5 +1,7 @@
 #pragma once
 
+#include "plugin_state.hpp"
+
 #include <cstdint>
 #include <cstddef>
 #include <memory>
@@ -29,6 +31,9 @@ struct PipeWireOptions {
     // Per-instance bypass (false by default); aligned with plugin_paths.
     // Once loaded, bypass may be changed atomically without restarting audio.
     std::vector<bool> plugin_bypassed;
+    // Opaque per-instance component/controller state. Snapshots are saved
+    // after audio processing has stopped, never from a PipeWire callback.
+    std::vector<PluginState> plugin_states;
     // Search roots for native Linux VST3 bundle directories.
     std::vector<std::string> plugin_directories;
     // Windows VST3 directories managed by optional Wine/yabridge integration.
@@ -62,6 +67,9 @@ public:
     bool set_plugin_bypassed(std::size_t index, bool bypassed) noexcept;
     [[nodiscard]] std::size_t plugin_count() const noexcept;
     [[nodiscard]] std::string plugin_path(std::size_t index) const;
+    // Read only AFTER run() has returned and the worker has been joined.
+    [[nodiscard]] std::vector<PluginState> saved_plugin_states() const;
+    [[nodiscard]] std::string plugin_state_warning() const;
     [[nodiscard]] std::string last_error() const;
     [[nodiscard]] AudioDiagnostics diagnostics() const noexcept;
 

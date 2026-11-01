@@ -27,7 +27,7 @@ QT_QPA_PLATFORM=wayland ./build/vst-host-gui
 QT_QPA_PLATFORM=xcb ./build/vst-host-gui
 ```
 
-The first build fetches the pinned Steinberg VST3 SDK unless `-DVST3_SDK_ROOT=/path/to/vst3sdk` is provided. The Qt GUI runs natively under Wayland, including standard plugin parameter controls. With X11/XWayland available, compatible third-party XEmbed editors open in a separate window while the Qt host stays on native Wayland. Running under Qt xcb still embeds those editors inside the dialog.
+The first build fetches the pinned Steinberg VST3 SDK unless `-DVST3_SDK_ROOT=/path/to/vst3sdk` is provided. The Qt GUI runs natively under Wayland, including standard plugin parameter controls. With X11/XWayland available, compatible third-party XEmbed editors open in a separate window while the Qt host stays on native Wayland. The editor dialog's **Plugin UI** tab provides a button to bring that companion window forward. Running under Qt xcb still embeds those editors inside the dialog.
 
 **VST2 is optional.** It requires a **locally provided, appropriately licensed legacy VST2.4 SDK**; the repository does not ship or fetch it. Add `-DVST_HOST_ENABLE_VST2=ON -DVST2_SDK_ROOT=/path/to/vst2sdk` to the CMake configuration to enable VST2 effects.
 

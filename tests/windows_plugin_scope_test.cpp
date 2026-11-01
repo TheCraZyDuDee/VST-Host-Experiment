@@ -110,6 +110,13 @@ int main() {
     std::ofstream(inline_dll) << "original Windows module";
     if (!windows_wrapper_in_selected_directories(inline_so.string(), roots_vst2)) return 9;
 
+    // A centralized wrapper and an inline .so sharing the same original DLL
+    // must also collapse to one available-plugin entry.
+    const auto inline_reacomp = vst2 / "ReaComp.so";
+    std::ofstream(inline_reacomp) << "inline bridge for ReaComp";
+    if (plugin_source_identity(inline_reacomp.string()) !=
+        plugin_source_identity(win_reacomp.string())) return 13;
+
     // An unrecognized broken wrapper, even within the output directory,
     // must not leak into the library as a plugin from some other root.
     const auto broken = centralized / "Unknown.so";

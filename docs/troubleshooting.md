@@ -43,7 +43,7 @@ If audio still differs with only `--config FILE`, try the same setup with every 
 ## Wine editor is blank, frozen, or ignores clicks
 
 1. For the main UI on Wayland, install your distribution's Qt Wayland platform plugin (for example `qt6-wayland`) and run `QT_QPA_PLATFORM=wayland ./build/vst-host-gui`. The standard **Parameters (host controls)** editor is available natively.
-2. For a plug-in's **custom XEmbed editor**, start the GUI through X11/XWayland: `QT_QPA_PLATFORM=xcb ./build/vst-host-gui` (build with X11 development headers installed). If the editor remains blank, try the **Parameters (host controls)** tab.
+2. For a plug-in's **custom XEmbed editor** in native Qt Wayland mode, ensure XWayland is running and `echo "$DISPLAY"` shows an X11 display. Build with optional X11 headers installed. The editor opens in a separate XWayland window alongside the native host. Run `QT_QPA_PLATFORM=wayland ./build/vst-host-gui --check-xembed-window` to check the X11 companion-window connection (this does not verify your plugin itself). To embed the editor *inside* the Qt dialog, use `QT_QPA_PLATFORM=xcb ./build/vst-host-gui`. If the plug-in UI remains blank, use **Parameters (host controls)**.
 3. If a Wine GUI does not repaint after adjusting settings, testing DXVK is worthwhile; effectiveness varies by plugin and system.
 4. Confirm your vstbridge/yabridge and Wine versions. For persistent editor issues, test the same plugin and bridge in another compatible VST host to isolate the cause.
 

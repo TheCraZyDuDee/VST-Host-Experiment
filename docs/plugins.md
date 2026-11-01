@@ -15,7 +15,7 @@ The host is for **audio effects**, not MIDI instruments. The main audio path is 
 
 ## Editing and bypass
 
-While audio runs, select an effect and open its GUI by double-clicking or using **Edit selected effect**. The editor's instance selector can switch between running effects. On X11/XWayland, plugins with compatible native editors appear embedded; on Wine, drawing/input behavior also depends on Wine and the bridge.
+While audio runs, select an effect and open its GUI by double-clicking or using **Edit selected effect**. The editor's instance selector can switch between running effects. The main Qt application runs natively under Wayland when Qt's Wayland platform plugin is installed. On Wayland, **Parameters (host controls)** work without X11. Plug-in-specific Linux/Wine editors using the VST XEmbed protocol still require running the Qt application with `QT_QPA_PLATFORM=xcb` under X11/XWayland; the application does not claim to provide Wayland-native third-party plugin editor embedding. On Wine, editor drawing/input also depends on Wine and the bridge.
 
 The **Parameters (host controls)** tab exposes up to 512 standard plugin parameters, useful when a plugin has no usable native editor. Not every custom GUI setting is exposed as a parameter.
 

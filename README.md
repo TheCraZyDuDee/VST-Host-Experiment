@@ -16,7 +16,15 @@ sudo apt install build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-d
 sudo apt install libx11-dev
 ```
 
-Build the GUI with VST3 hosting enabled:
+**Install for your user (recommended):**
+
+```sh
+bash scripts/install-user.sh
+```
+
+This builds (or reuses your configured build) and installs the CLI, GUI, and application-menu launcher under `~/.local` without `sudo`. Run `bash scripts/install-user.sh --uninstall` to remove installed files; saved settings and profiles are preserved. To install from an already compiled build, use `--no-build` (or `--build-dir DIR` for an alternate build folder). See [Getting started](docs/getting-started.md).
+
+**Or build and run directly from the repository:**
 
 ```sh
 cmake -S . -B build -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON

@@ -356,12 +356,12 @@ private:
 
 class PluginEditorDialog final : public QDialog {
 public:
-    explicit PluginEditorDialog(vst_host::audio::Vst3Processor* processor,
+    explicit PluginEditorDialog(vst_host::audio::PluginProcessor* processor,
                                 const QStringList& effectNames, int selectedIndex,
                                 std::function<void(int)> selectEffect,
                                 QWidget* parent = nullptr)
         : QDialog(parent), processor_(processor) {
-        setWindowTitle(tr("VST3 Plugin Editor"));
+        setWindowTitle(tr("Plugin Editor"));
         auto* layout = new QVBoxLayout(this);
         auto* selectorRow = new QHBoxLayout();
         selectorRow->addWidget(new QLabel(tr("Edit effect:"), this));
@@ -405,6 +405,13 @@ public:
             if (index == 1 && attached_) rebuildParameterPanel();
         });
         layout->addWidget(tabs_);
+        auto* editorIdle = new QTimer(this);
+        editorIdle->setInterval(50);
+        connect(editorIdle, &QTimer::timeout, this, [this] {
+            if (attached_ && processor_ && tabs_->currentIndex() == 0)
+                processor_->idle_editor();
+        });
+        editorIdle->start();
         resize(560, 400);
     }
 
@@ -424,16 +431,16 @@ public:
         auto* panel = new QWidget(parameterScroll_);
         auto* controls = new QVBoxLayout(panel);
         auto* hint = new QLabel(
-            tr("Host-provided controls for VST3 parameters. If a Wine editor draws "
-               "but ignores mouse input, try these sliders instead. Some plugins "
-               "do not expose every custom control as a VST3 parameter."), panel);
+            tr("Host controls for VST2/VST3 parameters. These can be used when "
+               "a native or Wine editor is unavailable or unresponsive. Not every "
+               "plugin exposes all of its custom settings."), panel);
         hint->setWordWrap(true);
         controls->addWidget(hint);
 
         const auto parameters = processor_->editor_parameters();
         if (parameters.empty()) {
             auto* empty = new QLabel(
-                tr("This effect did not report any standard VST3 parameters."), panel);
+                tr("This effect did not report any standard plugin parameters."), panel);
             empty->setWordWrap(true);
             controls->addWidget(empty);
         }
@@ -472,7 +479,7 @@ public:
         parameterScroll_->setWidget(panel);
     }
 
-    bool switchProcessor(vst_host::audio::Vst3Processor* processor, int index,
+    bool switchProcessor(vst_host::audio::PluginProcessor* processor, int index,
                          QString& error) {
         if (!processor) {
             error = tr("The requested effect is not ready.");
@@ -563,7 +570,7 @@ public:
     }
 
 private:
-    vst_host::audio::Vst3Processor* processor_{};
+    vst_host::audio::PluginProcessor* processor_{};
     QComboBox* selector_{};
     int activeIndex_{-1};
     bool windowInitialized_{false};
@@ -600,6 +607,22 @@ public:
         pluginLayout->addWidget(pluginPath_, 1);
         addPluginButton_ = new QPushButton(tr("Add effect"), pluginRow);
         pluginLayout->addWidget(addPluginButton_);
+#if defined(VST_HOST_ENABLE_VST2)
+        auto* addVst2Button = new QPushButton(tr("Add VST2 .so…"), pluginRow);
+        pluginLayout->addWidget(addVst2Button);
+        connect(addVst2Button, &QPushButton::clicked, this, [this] {
+            const auto path = QFileDialog::getOpenFileName(
+                this, tr("Add Linux VST2 plugin"), QString(),
+                tr("VST2 libraries (*.so);;All files (*)"));
+            if (!path.isEmpty() && path.endsWith(QStringLiteral(".so"), Qt::CaseInsensitive)) {
+                if (!manualPlugins_.contains(path)) manualPlugins_.append(path);
+                addAvailablePlugin(path, appearsToBeWineWrapper(path));
+                availablePlugins_->sortItems(Qt::AscendingOrder);
+                applyPluginFilter();
+                saveSettings();
+            }
+        });
+#endif
         form->addRow(tr("Plugin bundle"), pluginRow);
 
         availablePlugins_ = new QListWidget(central);
@@ -902,6 +925,10 @@ private:
         QString name = info.completeBaseName();
         if (name.isEmpty()) name = info.fileName();
         if (name.isEmpty()) name = path;
+        if (path.endsWith(QStringLiteral(".so"), Qt::CaseInsensitive))
+            name += tr(" (VST2)");
+        else if (path.endsWith(QStringLiteral(".vst3"), Qt::CaseInsensitive))
+            name += tr(" (VST3)");
         if (wine) name += tr(" (WINE)");
         return name;
     }
@@ -1158,7 +1185,7 @@ private:
 
         pluginScanPending_ = true;
         setEditingEnabled(false);
-        status_->setText(tr("Scanning Linux and Windows VST3 plugins…"));
+        status_->setText(tr("Scanning Linux and Windows plugins…"));
         pluginScanFuture_ = std::async(
             std::launch::async,
             [nativeDirectories = std::move(nativeDirectories),
@@ -1169,6 +1196,11 @@ private:
                 auto native = vst_host::audio::discover_vst3_plugins(
                     nativeDirectories, &result.warning);
                 for (auto& path : native) result.plugins.emplace_back(std::move(path), false);
+#if defined(VST_HOST_ENABLE_VST2)
+                auto nativeVst2 = vst_host::audio::discover_vst2_plugins(
+                    nativeDirectories, &result.warning);
+                for (auto& path : nativeVst2) result.plugins.emplace_back(std::move(path), false);
+#endif
                 if (!wineDirectories.empty()) {
                     vst_host::audio::PipeWireOptions bridgeOptions;
                     bridgeOptions.windows_plugin_directories = std::move(wineDirectories);
@@ -1184,8 +1216,12 @@ private:
                         // Never accidentally reload yabridge for a migrated entry.
                         for (auto& entry : result.plugins) {
                             if (entry.second)
-                                entry.first = vst_host::audio::detail::migrate_vst3_wrapper_path(
-                                    entry.first, selectedBridge);
+                                entry.first = vst_host::audio::plugin_format(entry.first) ==
+                                    vst_host::audio::PluginFormat::Vst2
+                                    ? vst_host::audio::detail::migrate_vst2_wrapper_path(
+                                        entry.first, selectedBridge)
+                                    : vst_host::audio::detail::migrate_vst3_wrapper_path(
+                                        entry.first, selectedBridge);
                         }
                         // Bridge wrappers are discovered, but never appended
                         // to the running chain without an explicit selection.
@@ -1193,6 +1229,12 @@ private:
                             bridgeOptions.plugin_directories, &result.warning);
                         for (auto& path : wrappers)
                             result.plugins.emplace_back(std::move(path), true);
+#if defined(VST_HOST_ENABLE_VST2)
+                        auto vst2Wrappers = vst_host::audio::discover_vst2_plugins(
+                            bridgeOptions.plugin_directories, &result.warning);
+                        for (auto& path : vst2Wrappers)
+                            result.plugins.emplace_back(std::move(path), true);
+#endif
                     }
                 }
                 // Both vstbridge and yabridge can mirror the same Windows
@@ -1226,7 +1268,7 @@ private:
         if (engine_) {
             QMessageBox::information(this, tr("Stop audio before saving"),
                 tr("Stop the audio engine first so the host can safely capture "
-                   "the current state of every VST3 effect."));
+                   "the current state of every effect."));
             return;
         }
         const auto path = QFileDialog::getSaveFileName(

@@ -463,10 +463,12 @@ AudioDiagnostics PipeWireEngine::diagnostics() const noexcept {
 }
 
 int PipeWireEngine::run() {
-    // The bridge is globally configured and can add broad ~/.vst* wrapper
-    // search paths. Preserve the user's native search paths independently:
-    // only bridge discoveries need Windows-original-directory filtering.
-    const auto nativePluginDirectories = impl_->options.plugin_directories;
+    // A .vsthost file persists discovery roots so the GUI can repopulate its
+    // library, but they are NOT additional processing-chain entries. Only
+    // directory flags explicitly passed to the headless CLI populate these
+    // non-persisted auto-load roots. Both frontends use the same DSP engine.
+    const auto nativeAutoLoadRoots = impl_->options.auto_load_plugin_directories;
+    const auto windowsAutoLoadRoots = impl_->options.auto_load_windows_plugin_directories;
     std::string bridge_error;
     std::string bridge_warning;
     WindowsBridgeSelection selected_bridge;
@@ -543,39 +545,43 @@ int PipeWireEngine::run() {
     if (preloaded_plugins.empty() && impl_->options.preloaded_plugin)
         preloaded_plugins.push_back(impl_->options.preloaded_plugin);
     std::string scan_warning;
-    auto discovered_plugins = discover_vst3_plugins(
-        nativePluginDirectories, &scan_warning);
+    auto discovered_plugins = discover_vst3_plugins(nativeAutoLoadRoots, &scan_warning);
 #if defined(VST_HOST_ENABLE_VST2)
-    auto native_vst2 = discover_vst2_plugins(
-        nativePluginDirectories, &scan_warning);
+    auto native_vst2 = discover_vst2_plugins(nativeAutoLoadRoots, &scan_warning);
     discovered_plugins.insert(discovered_plugins.end(),
                               native_vst2.begin(), native_vst2.end());
 #endif
-    if (!impl_->options.windows_plugin_directories.empty()) {
-        std::vector<std::string> bridgeDirectories;
-        for (const auto& dir : impl_->options.plugin_directories) {
-            if (std::find(nativePluginDirectories.begin(),
-                          nativePluginDirectories.end(), dir) == nativePluginDirectories.end())
-                bridgeDirectories.push_back(dir);
-        }
+    if (!windowsAutoLoadRoots.empty()) {
+        // The bridge's registry can include every Windows folder registered by
+        // unrelated hosts. Search its generated wrappers, but select ONLY
+        // originals inside the Windows roots explicitly passed on this CLI
+        // invocation. Also scan those roots for inline-installed wrappers.
+        std::vector<std::string> bridgeDirectories = windowsAutoLoadRoots;
+        if (!selected_bridge.wrapper_directory.empty())
+            bridgeDirectories.push_back(selected_bridge.wrapper_directory.string());
+#if defined(VST_HOST_ENABLE_VST2)
+        if (!selected_bridge.vst2_wrapper_directory.empty())
+            bridgeDirectories.push_back(selected_bridge.vst2_wrapper_directory.string());
+#endif
         auto bridgeVst3 = discover_vst3_plugins(bridgeDirectories, &scan_warning);
         std::size_t excluded = 0;
         bridgeVst3 = filter_bridge_plugins_to_selected_roots(
-            bridgeVst3, impl_->options.windows_plugin_directories, &excluded);
+            bridgeVst3, windowsAutoLoadRoots, &excluded);
         discovered_plugins.insert(discovered_plugins.end(),
                                   bridgeVst3.begin(), bridgeVst3.end());
 #if defined(VST_HOST_ENABLE_VST2)
         auto bridgeVst2 = discover_vst2_plugins(bridgeDirectories, &scan_warning);
         std::size_t excludedVst2 = 0;
         bridgeVst2 = filter_bridge_plugins_to_selected_roots(
-            bridgeVst2, impl_->options.windows_plugin_directories, &excludedVst2);
+            bridgeVst2, windowsAutoLoadRoots, &excludedVst2);
         excluded += excludedVst2;
         discovered_plugins.insert(discovered_plugins.end(),
                                   bridgeVst2.begin(), bridgeVst2.end());
 #endif
         if (excluded > 0)
             std::fprintf(stderr, "Skipped %zu global Wine bridge wrapper(s) "
-                         "outside selected Windows plugin directories.\n", excluded);
+                         "outside explicitly selected Windows auto-load directories.\n",
+                         excluded);
     }
     // Separate aliases are collapsed only for auto-discovery; explicitly
     // selected instances remain in the original processing order.
@@ -590,10 +596,16 @@ int PipeWireEngine::run() {
     std::unordered_set<std::string> known_modules;
     for (const auto& path : plugin_paths)
         known_modules.insert(plugin_source_identity(path));
+    std::size_t added_by_directory_discovery = 0;
     for (const auto& entry : discovered_entries) {
-        if (known_modules.insert(plugin_source_identity(entry.first)).second)
+        if (known_modules.insert(plugin_source_identity(entry.first)).second) {
             plugin_paths.push_back(entry.first);
+            ++added_by_directory_discovery;
+        }
     }
+    if (!nativeAutoLoadRoots.empty() || !windowsAutoLoadRoots.empty())
+        std::printf("CLI directory auto-load: %zu additional plugin(s)\n",
+                    added_by_directory_discovery);
     if (preloaded_plugins.size() > plugin_paths.size()) {
         return impl_->fail(
             "More preloaded VST3 instances than plugin paths were supplied.", -EINVAL);

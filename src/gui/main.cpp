@@ -1231,6 +1231,24 @@ public:
         pollTimer_->setInterval(200);
         connect(pollTimer_, &QTimer::timeout, this, [this] { pollEngine(); });
         loadSettings();
+        refreshProfileSelector();
+        if (startedAtLogin_) {
+            QSettings startupSettings(QStringLiteral("VSTHostExperiment"),
+                                      QStringLiteral("VSTHostExperiment"));
+            const auto id = startupSettings.value(
+                QStringLiteral("autostart/profileId")).toString();
+            // Never start with the previous arbitrary workspace when the
+            // explicitly selected login profile has been deleted or damaged.
+            if (!id.isEmpty() && loadSavedProfile(id, false, true)) {
+                autostartStartPending_ = startupSettings.value(
+                    QStringLiteral("autostart/startAudio"), false).toBool();
+            } else if (startupSettings.value(
+                    QStringLiteral("autostart/startAudio"), false).toBool()) {
+                status_->setText(tr("Login audio was not started: no valid "
+                                    "saved login profile is available."));
+            }
+        }
+        scanPluginDirectories();
         // On a first launch, make plugin discovery obvious; returning users
         // with configured roots keep the workspace compact by default.
         if (pluginDirectories_->count() == 0 && manualPlugins_.isEmpty())
@@ -1385,8 +1403,7 @@ private:
         addWindowsDirectoryButton_->setEnabled(enabled);
         removeDirectoryButton_->setEnabled(enabled);
         scanDirectoriesButton_->setEnabled(enabled);
-        loadConfigButton_->setEnabled(enabled);
-        saveConfigButton_->setEnabled(enabled);
+        updateProfileActions();
         clearSavedStateButton_->setEnabled(enabled && chainList_->currentRow() >= 0);
         // Routing/gain/latency are startup-only controls. Keep the selected
         // node name fixed for the running session; only live per-effect bypass
@@ -1435,7 +1452,6 @@ private:
                                                 QStringLiteral("128")).toString());
         bypass_->setChecked(settings.value(QStringLiteral("gainBypassed"), false).toBool());
         settings.endGroup();
-        scanPluginDirectories();
         if (chainList_->count() > 0) chainList_->setCurrentRow(0);
     }
 
@@ -1505,7 +1521,8 @@ private:
         return options;
     }
 
-    void applyOptions(const vst_host::audio::PipeWireOptions& options) {
+    void applyOptions(const vst_host::audio::PipeWireOptions& options,
+                      bool startDiscovery = true) {
         chainList_->clear();
         for (std::size_t index = 0; index < options.plugin_paths.size(); ++index) {
             const auto qpath = QString::fromStdString(options.plugin_paths[index]);
@@ -1520,7 +1537,7 @@ private:
             addPluginDirectory(QString::fromStdString(directory), false);
         for (const auto& directory : options.windows_plugin_directories)
             addPluginDirectory(QString::fromStdString(directory), true);
-        scanPluginDirectories();
+        if (startDiscovery) scanPluginDirectories();
         inputDevice_->setEditText(QString::fromStdString(options.input_target));
         outputName_->setText(QString::fromStdString(options.output_name));
         gain_->setValue(options.gain);
@@ -1992,6 +2009,8 @@ private:
                                   QString::fromStdString(error));
             return;
         }
+        activeProfileId_.clear();
+        refreshProfileSelector();
         applyOptions(options);
         saveSettings();
     }
@@ -2386,6 +2405,11 @@ private:
                 summary += QStringLiteral("\n") + QString::fromStdString(result.warning);
             status_->setText(summary);
         }
+        if (autostartStartPending_ && !engine_ &&
+            !pluginScanPending_ && !deviceScanPending_) {
+            autostartStartPending_ = false;
+            startAudio();
+        }
         if (!engine_) return;
         if (engineFinished_.load(std::memory_order_acquire)) {
             const auto engineError = engine_->last_error();
@@ -2508,8 +2532,18 @@ private:
     QPushButton* addWindowsDirectoryButton_{};
     QPushButton* removeDirectoryButton_{};
     QPushButton* scanDirectoriesButton_{};
-    QPushButton* loadConfigButton_{};
-    QPushButton* saveConfigButton_{};
+    QComboBox* profileSelector_{};
+    QPushButton* saveProfileButton_{};
+    QToolButton* profileMenuButton_{};
+    QAction* profileSaveAsAction_{};
+    QAction* profileRenameAction_{};
+    QAction* profileDeleteAction_{};
+    QAction* profileImportAction_{};
+    QAction* profileLoadFileAction_{};
+    QAction* profileExportAction_{};
+    QString activeProfileId_;
+    bool startedAtLogin_{false};
+    bool autostartStartPending_{false};
     QPushButton* clearSavedStateButton_{};
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};
@@ -2557,6 +2591,7 @@ private:
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    app.setApplicationVersion(QStringLiteral(VST_HOST_VERSION));
     // Quick diagnostic for a native Qt Wayland session: verify we can create
     // an independent XEmbed parent on DISPLAY without starting PipeWire or
     // loading any third-party plugin. This does not test plugin compatibility.
@@ -2602,7 +2637,16 @@ int main(int argc, char** argv) {
                   "external-editor launcher awaits a loaded plugin.");
         return 0;
     }
-    MainWindow window;
+    const bool launchedAtLogin =
+        app.arguments().contains(QStringLiteral("--autostart"));
+    if (launchedAtLogin) {
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        // A stale desktop entry must not override a disabled preference.
+        if (!settings.value(QStringLiteral("autostart/enabled"), false).toBool())
+            return 0;
+    }
+    MainWindow window(launchedAtLogin);
     window.show();
     return app.exec();
 }

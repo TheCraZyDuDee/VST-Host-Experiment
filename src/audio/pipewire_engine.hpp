@@ -11,6 +11,7 @@
 namespace vst_host::audio {
 
 class Vst3Processor;
+class PluginProcessor;
 
 struct AudioDiagnostics {
     std::uint64_t dropped_frames{};
@@ -26,7 +27,7 @@ struct PipeWireOptions {
     std::string input_target;
     std::string output_name{"vst-host-virtual-mic"};
     std::string output_description{"VST Host Virtual Microphone"};
-    // Ordered VST3 effects. Legacy single-plugin fields remain supported.
+    // Ordered VST2 .so and VST3 .vst3 effects. Legacy VST3 fields remain supported.
     std::vector<std::string> plugin_paths;
     // Per-instance bypass (false by default); aligned with plugin_paths.
     // Once loaded, bypass may be changed atomically without restarting audio.
@@ -38,7 +39,7 @@ struct PipeWireOptions {
     std::vector<std::string> plugin_directories;
     // Windows VST3 directories managed by optional Wine/yabridge integration.
     std::vector<std::string> windows_plugin_directories;
-    std::vector<std::shared_ptr<Vst3Processor>> preloaded_plugins;
+    std::vector<std::shared_ptr<Vst3Processor>> preloaded_plugins; // legacy VST3 preloads
     std::string plugin_path;
     std::shared_ptr<Vst3Processor> preloaded_plugin;
     float gain{1.0F};
@@ -61,8 +62,8 @@ public:
     // present and the capture stream is active. An empty/default input is
     // intentionally not pinned and always reports true.
     [[nodiscard]] bool selected_input_available() const noexcept;
-    [[nodiscard]] Vst3Processor* plugin_processor() const noexcept;
-    [[nodiscard]] Vst3Processor* plugin_processor(std::size_t index) const noexcept;
+    [[nodiscard]] PluginProcessor* plugin_processor() const noexcept;
+    [[nodiscard]] PluginProcessor* plugin_processor(std::size_t index) const noexcept;
     // Safe to call from the UI while PipeWire audio processing is active.
     bool set_plugin_bypassed(std::size_t index, bool bypassed) noexcept;
     [[nodiscard]] std::size_t plugin_count() const noexcept;

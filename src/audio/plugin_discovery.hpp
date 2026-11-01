@@ -11,6 +11,77 @@
 
 namespace vst_host::audio {
 
+enum class PluginFormat { Vst2, Vst3, Unknown };
+
+// Linux native VST2 plugins and bridged Windows VST2 plugins use .so files;
+// native VST3 plugins and Wine VST3 wrappers use .vst3 bundles.
+[[nodiscard]] inline PluginFormat plugin_format(const std::string& path) {
+    const auto extension = std::filesystem::path(path).extension().string();
+    if (extension == ".so") return PluginFormat::Vst2;
+    if (extension == ".vst3") return PluginFormat::Vst3;
+    return PluginFormat::Unknown;
+}
+
+inline std::vector<std::string> discover_vst2_plugins(
+    const std::vector<std::string>& directories, std::string* warning = nullptr) {
+    namespace fs = std::filesystem;
+    std::vector<std::string> found;
+    for (const auto& directory : directories) {
+        std::error_code ec;
+        const fs::path root(directory);
+        if (root.extension() == ".so" && fs::is_regular_file(root, ec) && !ec) {
+            found.push_back(root.lexically_normal().string());
+            continue;
+        }
+        if (!fs::is_directory(root, ec) || ec) {
+            if (warning) *warning += "Unavailable VST2 search directory: " + directory + "\n";
+            continue;
+        }
+        fs::recursive_directory_iterator it(
+            root, fs::directory_options::skip_permission_denied, ec), end;
+        while (it != end) {
+            std::error_code entry_ec;
+            const auto entry = *it;
+            // Don't report shared libraries *inside* a VST3 bundle as VST2.
+            if (entry.is_directory(entry_ec) && entry.path().extension() == ".vst3") {
+                it.disable_recursion_pending();
+            } else if (entry.path().extension() == ".so" &&
+                       entry.is_regular_file(entry_ec) && !entry_ec) {
+                found.push_back(entry.path().lexically_normal().string());
+            }
+            it.increment(ec);
+            if (ec) {
+                if (warning) *warning += "VST2 scan failed in " + directory + ": " +
+                                        ec.message() + "\n";
+                ec.clear();
+            }
+        }
+    }
+    std::sort(found.begin(), found.end());
+    found.erase(std::unique(found.begin(), found.end()), found.end());
+    return found;
+}
+
+// In centralized Wine VST2 mode, the wrapper's adjacent .dll symlink points
+// to the original Windows plugin. De-duplicate aliases by that target, not
+// the name of the Linux .so chainloader (which is identical for every plugin).
+inline std::string vst2_plugin_source_identity(const std::string& path) {
+    namespace fs = std::filesystem;
+    const fs::path so(path);
+    auto dll = so;
+    dll.replace_extension(".dll");
+    std::error_code ec;
+    // Centralized wrappers use a .dll symlink, while inline mode places
+    // the actual Windows DLL beside the bridge .so. Both represent the same
+    // plugin when the canonical source module is identical.
+    if (fs::is_regular_file(dll, ec) && !ec) {
+        const auto target = fs::canonical(dll, ec);
+        if (!ec) return "windows-vst2:" + target.string();
+    }
+    const auto resolved = fs::weakly_canonical(so, ec);
+    return "vst2-bundle:" + (ec ? so.lexically_normal().string() : resolved.string());
+}
+
 // VST3 Linux bundles are directories ending in .vst3. Do not recurse into a
 // discovered bundle: its internal Contents tree is not a plugin search root.
 inline std::vector<std::string> discover_vst3_plugins(
@@ -103,6 +174,13 @@ inline std::string vst3_plugin_source_identity(const std::string& bundle_path) {
 // (e.g. 'rnnoise.vst3' rather than 'VST3/rnnoise.vst3'), consistently on
 // successive scans. This only changes discovery; an explicitly selected
 // processing chain may still contain two intentional instances.
+// Format-qualified source IDs avoid collisions between VST2 and VST3
+// bundles with similar names and preserve multiple intentional chain instances.
+inline std::string plugin_source_identity(const std::string& path) {
+    return plugin_format(path) == PluginFormat::Vst2
+        ? vst2_plugin_source_identity(path) : vst3_plugin_source_identity(path);
+}
+
 inline bool preferable_vst3_path(const std::string& a, const std::string& b) {
     return a.size() < b.size() || (a.size() == b.size() && a < b);
 }
@@ -134,7 +212,7 @@ inline std::vector<std::pair<std::string, bool>> deduplicate_vst3_browser_entrie
     std::unordered_map<std::string, std::pair<std::string, bool>> by_source;
     for (const auto& entry : entries) {
         auto [it, inserted] = by_source.try_emplace(
-            vst3_plugin_source_identity(entry.first), entry);
+            plugin_source_identity(entry.first), entry);
         if (!inserted) {
             // An entry known to be a Wine wrapper should retain its (WINE)
             // label, even if its alias was scanned as a regular Linux bundle.

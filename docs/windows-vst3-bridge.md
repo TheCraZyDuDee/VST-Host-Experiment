@@ -1,8 +1,8 @@
-# Windows VST3 bridging: vstbridge preferred, yabridge fallback
+# Windows VST2/VST3 bridging: vstbridge preferred, yabridge fallback
 
 ## Decision
 
-**Prefer [vstbridge](https://github.com/rations/vstbridge) for Windows VST3
+**Prefer [vstbridge](https://github.com/rations/vstbridge) for Windows VST2/VST3
 plugins**, with [yabridge](https://github.com/robbert-vdh/yabridge) as a
 compatibility fallback. Both are optional external applications, not bundled,
 downloaded, or installed by the VST Host Experiment.
@@ -69,11 +69,42 @@ re-scan, confirm synchronization, and re-add the effect explicitly. CLI
 chains containing explicit wrapper paths are migrated on startup when
 Windows directories were configured and synchronized.
 
-**Important:** Existing per-plug-in settings or state are not migrated by
-this mechanism; this host currently saves plugin paths and audio settings,
-not native VST3 plugin state. yabridge and vstbridge have distinct global
+**Important:** Per-plugin VST3 and (when built with an appropriate legacy
+SDK) VST2 state is saved separately from plugin paths. The automatic wrapper
+path migration preserves the chain entry's stored state but cannot guarantee
+that a different version of the bridged plug-in accepts the same snapshot. yabridge and vstbridge have distinct global
 configuration and plugin wrapper directories. Removing a Windows search
 directory from our UI does not unregister it from the external bridge.
+
+## Selected Windows directory scope
+
+**vstbridgectl and yabridgectl use a global plugin registry shared with other
+audio applications.** Calling `sync` updates wrappers for all registered
+roots, not just the folder selected in VST Host Experiment. Previously the
+host then scanned all wrappers under `~/.vst3/vstbridge/` and (with VST2
+enabled) `~/.vst/vstbridge/`, so selecting `Windows/VST2` incorrectly showed
+effects from sibling `Windows/VST3` and unrelated global roots.
+
+The host now **filters bridge-derived scan results by their original
+Windows modules**, resolved through the VST2 wrapper's adjacent
+`.dll` symlink or the VST3 wrapper's
+`Contents/*-win/*.vst3` symlink. VST2 inline wrappers next to an original
+`.dll`, and VST3 inline bundles with installed native Linux `.so` modules,
+are supported too. Only originals within the **Windows directories explicitly
+configured in this host** appear in the automatic browser results or CLI
+auto-discovered chain. Path comparisons use resolved, component-aware
+directory relationships: selecting `VST2` cannot include sibling `VST3`
+or `VST2-Other` entries. Selecting their common parent intentionally
+includes both subdirectories recursively.
+
+Explicitly added plugins and existing active-chain effects are retained,
+including those outside current scan roots. Removing a Windows directory from
+the host does not revoke existing selections, change the global external
+bridge registry, or delete wrapper files. The GUI scan status reports how many
+bridge wrappers were excluded because their originals are outside the
+selected Windows roots. Broken wrappers without a resolvable original module
+are omitted from automatic bridge discovery; add such a wrapper explicitly
+only after correcting its installation.
 
 ## Duplicate Windows VST3 plugins and overlapping search roots
 

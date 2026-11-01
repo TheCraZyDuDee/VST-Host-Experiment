@@ -14,6 +14,20 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
 
 option(VST_HOST_ENABLE_VST3 "Enable native VST3 hosting (fetch the SDK automatically if needed)" OFF)
+option(VST_HOST_ENABLE_VST2 "Enable legacy VST2.4 hosting (requires a legally licensed, user-provided SDK)" OFF)
+set(VST2_SDK_ROOT "" CACHE PATH "Local directory containing licensed VST2.4 aeffectx.h (never downloaded)")
+if(VST_HOST_ENABLE_VST2)
+    if(NOT VST2_SDK_ROOT)
+        message(FATAL_ERROR "VST2 support requires -DVST2_SDK_ROOT=... pointing to your licensed legacy SDK. Steinberg stopped issuing VST2 licenses in October 2018.")
+    endif()
+    find_path(VST2_SDK_INCLUDE_DIR aeffectx.h
+        PATHS "${VST2_SDK_ROOT}" "${VST2_SDK_ROOT}/pluginterfaces/vst2.x"
+        NO_DEFAULT_PATH)
+    if(NOT VST2_SDK_INCLUDE_DIR)
+        message(FATAL_ERROR "Could not find aeffectx.h in VST2_SDK_ROOT or its pluginterfaces/vst2.x subfolder. VST2 SDK files are intentionally not bundled or fetched.")
+    endif()
+    message(STATUS "Optional VST2.4 hosting enabled with user-provided headers at ${VST2_SDK_INCLUDE_DIR}. Ensure your development and distribution comply with Steinberg's legacy license.")
+endif()
 option(VST_HOST_BUILD_GUI "Build the optional Qt 6 GUI (requires VST3 hosting)" OFF)
 set(VST3_SDK_ROOT "" CACHE PATH "Optional path to an existing Steinberg VST3 SDK checkout")
 
@@ -82,10 +96,15 @@ add_executable(vst-host
     src/audio/pipewire_engine.cpp
     src/audio/gain_processor.cpp
     src/audio/vst3_processor.cpp
+    src/audio/vst2_processor.cpp
 )
 
 target_compile_features(vst-host PRIVATE cxx_std_20)
-target_link_libraries(vst-host PRIVATE PkgConfig::PIPEWIRE)
+target_link_libraries(vst-host PRIVATE PkgConfig::PIPEWIRE ${CMAKE_DL_LIBS})
+if(VST_HOST_ENABLE_VST2)
+    target_compile_definitions(vst-host PRIVATE VST_HOST_ENABLE_VST2=1)
+    target_include_directories(vst-host PRIVATE "${VST2_SDK_INCLUDE_DIR}")
+endif()
 
 if(VST_HOST_HAVE_VST3)
     target_compile_definitions(vst-host PRIVATE VST_HOST_ENABLE_VST3=1)
@@ -105,11 +124,16 @@ if(VST_HOST_BUILD_GUI)
         src/audio/pipewire_engine.cpp
         src/audio/gain_processor.cpp
         src/audio/vst3_processor.cpp
+        src/audio/vst2_processor.cpp
     )
     target_include_directories(vst-host-gui PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(vst-host-gui PRIVATE cxx_std_20)
     target_compile_definitions(vst-host-gui PRIVATE VST_HOST_ENABLE_VST3=1)
-    target_link_libraries(vst-host-gui PRIVATE PkgConfig::PIPEWIRE Qt6::Widgets X11::X11 sdk_hosting)
+    target_link_libraries(vst-host-gui PRIVATE PkgConfig::PIPEWIRE Qt6::Widgets X11::X11 sdk_hosting ${CMAKE_DL_LIBS})
+    if(VST_HOST_ENABLE_VST2)
+        target_compile_definitions(vst-host-gui PRIVATE VST_HOST_ENABLE_VST2=1)
+        target_include_directories(vst-host-gui PRIVATE "${VST2_SDK_INCLUDE_DIR}")
+    endif()
     if(MSVC)
         target_compile_options(vst-host-gui PRIVATE /W4 /permissive-)
     else()
@@ -164,6 +188,33 @@ if(BUILD_TESTING)
     target_compile_features(processor-chain-test PRIVATE cxx_std_20)
     add_test(NAME processor-chain-test COMMAND processor-chain-test)
 
+    # Check the Linux GCC/Clang legacy aeffect.h calling-convention syntax
+    # even when the non-redistributable VST2 SDK is not available in CI.
+    add_executable(windows-plugin-scope-test tests/windows_plugin_scope_test.cpp)
+    target_include_directories(windows-plugin-scope-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(windows-plugin-scope-test PRIVATE cxx_std_20)
+    add_test(NAME windows-plugin-scope-test COMMAND windows-plugin-scope-test)
+
+    add_executable(vst2-audio-layout-test tests/vst2_audio_layout_test.cpp)
+    target_include_directories(vst2-audio-layout-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(vst2-audio-layout-test PRIVATE cxx_std_20)
+    add_test(NAME vst2-audio-layout-test COMMAND vst2-audio-layout-test)
+
+    add_executable(vst2-legacy-abi-compat-test tests/vst2_legacy_abi_compat_test.cpp)
+    target_include_directories(vst2-legacy-abi-compat-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(vst2-legacy-abi-compat-test PRIVATE cxx_std_20)
+    add_test(NAME vst2-legacy-abi-compat-test COMMAND vst2-legacy-abi-compat-test)
+
+    add_executable(vst2-processor-test tests/vst2_processor_test.cpp src/audio/vst2_processor.cpp)
+    target_include_directories(vst2-processor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(vst2-processor-test PRIVATE cxx_std_20)
+    target_link_libraries(vst2-processor-test PRIVATE ${CMAKE_DL_LIBS})
+    if(VST_HOST_ENABLE_VST2)
+        target_compile_definitions(vst2-processor-test PRIVATE VST_HOST_ENABLE_VST2=1)
+        target_include_directories(vst2-processor-test PRIVATE "${VST2_SDK_INCLUDE_DIR}")
+    endif()
+    add_test(NAME vst2-processor-test COMMAND vst2-processor-test)
+
     add_executable(vst3-processor-test tests/vst3_processor_test.cpp src/audio/vst3_processor.cpp)
     target_include_directories(vst3-processor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(vst3-processor-test PRIVATE cxx_std_20)
@@ -175,7 +226,7 @@ if(BUILD_TESTING)
         foreach(test_target IN ITEMS
                 ring-buffer-test capture-target-policy-test plugin-state-test parameter-event-queue-test audio-processor-test config-test
                 plugin-discovery-test windows-bridge-manager-test processor-chain-test
-                vst3-processor-test)
+                windows-plugin-scope-test vst2-audio-layout-test vst2-legacy-abi-compat-test vst2-processor-test vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)
         endforeach()
     endif()

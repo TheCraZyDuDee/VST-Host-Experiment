@@ -163,6 +163,14 @@ if(BUILD_TESTING)
     add_executable(ring-buffer-test tests/ring_buffer_test.cpp)
     target_include_directories(ring-buffer-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(ring-buffer-test PRIVATE cxx_std_20)
+    if(VST_HOST_BUILD_GUI)
+        add_executable(profile-management-test tests/profile_management_test.cpp)
+        target_include_directories(profile-management-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+        target_link_libraries(profile-management-test PRIVATE Qt6::Core)
+        target_compile_features(profile-management-test PRIVATE cxx_std_20)
+        add_test(NAME profile-management-test COMMAND profile-management-test)
+    endif()
+
     add_test(NAME ring-buffer-test COMMAND ring-buffer-test)
 
     # Validate capture byte ranges without requiring a PipeWire server.
@@ -262,6 +270,10 @@ if(BUILD_TESTING)
     target_include_directories(vst3-processor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
     target_compile_features(vst3-processor-test PRIVATE cxx_std_20)
     add_test(NAME vst3-processor-test COMMAND vst3-processor-test)
+
+    if(VST_HOST_BUILD_GUI AND NOT MSVC)
+        target_compile_options(profile-management-test PRIVATE -UNDEBUG)
+    endif()
 
     # CTest runs in Release on CI. Preserve assertions in test executables:
     # many existing tests use assert() for both setup and verification.

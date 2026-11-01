@@ -393,7 +393,24 @@ inline bool prepare_windows_vst3_plugins(PipeWireOptions& options, std::string& 
     const bool has_vst2 = !vst2_directory.empty() &&
         std::filesystem::is_directory(vst2_directory, wrapper_error) && !wrapper_error;
 #if defined(VST_HOST_ENABLE_VST2)
-    if (!has_vst2 && !has_vst3) {
+    // Inline VST2 installation is also valid even when neither centralized
+    // wrapper directory exists. Sync placed .so files next to original DLLs.
+    bool has_inline_vst2 = false;
+    for (const auto& root : options.windows_plugin_directories) {
+        std::error_code scan_error;
+        std::filesystem::recursive_directory_iterator it(
+            root, std::filesystem::directory_options::skip_permission_denied, scan_error), end;
+        while (it != end) {
+            if (it->path().extension() == ".so" && it->is_regular_file(scan_error)) {
+                has_inline_vst2 = true;
+                break;
+            }
+            it.increment(scan_error);
+            if (scan_error) scan_error.clear();
+        }
+        if (has_inline_vst2) break;
+    }
+    if (!has_vst2 && !has_vst3 && !has_inline_vst2) {
 #else
     if (!has_vst3) {
 #endif

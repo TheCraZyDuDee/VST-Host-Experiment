@@ -5,7 +5,7 @@
 | Symptom | Check |
 | --- | --- |
 | CMake says VST3 needs a newer version | Use **CMake 3.25+** when VST3 is enabled; the SDK-free build needs 3.20+. |
-| CMake cannot find PipeWire, Qt or X11 | Install the corresponding development packages; see [Getting started](getting-started.md). |
+| CMake cannot find PipeWire or Qt | Install the corresponding development packages; see [Getting started](getting-started.md). X11 headers are optional and only needed to build XEmbed editor support. |
 | VST2 SDK not found | Point `VST2_SDK_ROOT` to your licensed SDK root containing `pluginterfaces/vst2.x/aeffectx.h`; VST2 is off by default. |
 | Legacy VST2 `__cdecl` / `aeffect.h` callback errors | Pull the latest source; the Linux compatibility shim should be included before the SDK headers. Do not edit your SDK. |
 | Virtual microphone or selected input is missing | Ensure PipeWire is running in your logged-in user session. Inspect `wpctl status`, refresh GUI devices, and check the input node name. |
@@ -42,8 +42,8 @@ If audio still differs with only `--config FILE`, try the same setup with every 
 
 ## Wine editor is blank, frozen, or ignores clicks
 
-1. Run the GUI through X11/XWayland: `QT_QPA_PLATFORM=xcb ./build/vst-host-gui`.
-2. Try the editor's **Parameters (host controls)** tab. It works with standard exported parameters even when the plugin's custom editor cannot.
+1. For the main UI on Wayland, install your distribution's Qt Wayland platform plugin (for example `qt6-wayland`) and run `QT_QPA_PLATFORM=wayland ./build/vst-host-gui`. The standard **Parameters (host controls)** editor is available natively.
+2. For a plug-in's **custom XEmbed editor**, start the GUI through X11/XWayland: `QT_QPA_PLATFORM=xcb ./build/vst-host-gui` (build with X11 development headers installed). If the editor remains blank, try the **Parameters (host controls)** tab.
 3. If a Wine GUI does not repaint after adjusting settings, testing DXVK is worthwhile; effectiveness varies by plugin and system.
 4. Confirm your vstbridge/yabridge and Wine versions. For persistent editor issues, test the same plugin and bridge in another compatible VST host to isolate the cause.
 

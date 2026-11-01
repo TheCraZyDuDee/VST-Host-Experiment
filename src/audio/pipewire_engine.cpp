@@ -2,6 +2,7 @@
 
 #include "stereo_ring_buffer.hpp"
 #include "buffer_bounds.hpp"
+#include "nonfinite_sanitizer.hpp"
 #include "capture_target_policy.hpp"
 #include "processor_chain.hpp"
 #include "gain_processor.hpp"
@@ -49,6 +50,8 @@ struct EngineState {
     StereoRingBuffer ring;
     StereoLevelMeter input_meter;
     StereoLevelMeter output_meter;
+    std::atomic<std::uint64_t> sanitized_input_samples{0};
+    std::atomic<std::uint64_t> sanitized_output_samples{0};
     GainProcessor processor;
     std::vector<std::shared_ptr<PluginProcessor>> plugin_chain;
     std::vector<std::string> plugin_paths;
@@ -146,9 +149,21 @@ void on_source_process(void* userdata) {
         } else {
             state->ring.pop_interleaved(samples, frames,
                 std::max<std::size_t>(1024, state->latency_frames * 4));
+            // Reject nonfinite capture/bridge samples before they can enter
+            // third-party DSP. Finite audio remains bit-for-bit unchanged.
+            const auto invalidInput = sanitize_nonfinite_stereo(samples, frames);
+            if (invalidInput != 0)
+                state->sanitized_input_samples.fetch_add(
+                    invalidInput, std::memory_order_relaxed);
             state->processor_chain.process(samples, frames);
             state->processor.process(samples, frames);
         }
+        // A broken plug-in must not inject NaN/Inf samples into the PipeWire
+        // virtual microphone. Do not clip finite over-full-scale samples.
+        const auto invalidOutput = sanitize_nonfinite_stereo(samples, frames);
+        if (invalidOutput != 0)
+            state->sanitized_output_samples.fetch_add(
+                invalidOutput, std::memory_order_relaxed);
         state->output_meter.observe(samples, frames);
 
         data.chunk->offset = 0;
@@ -468,6 +483,10 @@ AudioDiagnostics PipeWireEngine::diagnostics() const noexcept {
         .dropped_frames = impl_->state.ring.dropped_frames(),
         .stale_frames = impl_->state.ring.stale_frames(),
         .underrun_frames = impl_->state.ring.underrun_frames(),
+        .sanitized_input_samples = impl_->state.sanitized_input_samples.load(
+            std::memory_order_relaxed),
+        .sanitized_output_samples = impl_->state.sanitized_output_samples.load(
+            std::memory_order_relaxed),
     };
 }
 
@@ -749,6 +768,17 @@ int PipeWireEngine::run() {
                     1000.0 * static_cast<double>(underruns) / sample_rate,
                     static_cast<unsigned long long>(stale),
                     1000.0 * static_cast<double>(stale) / sample_rate);
+        const auto invalidInput =
+            impl_->state.sanitized_input_samples.load(std::memory_order_relaxed);
+        const auto invalidOutput =
+            impl_->state.sanitized_output_samples.load(std::memory_order_relaxed);
+        if (invalidInput != 0 || invalidOutput != 0)
+            std::fprintf(stderr,
+                "Audio warning: replaced %llu nonfinite input sample(s) "
+                "and %llu nonfinite post-effect output sample(s) with silence. "
+                "A plugin or input may be producing NaN/Inf values.\n",
+                static_cast<unsigned long long>(invalidInput),
+                static_cast<unsigned long long>(invalidOutput));
     }
 
     return result;

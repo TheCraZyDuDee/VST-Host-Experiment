@@ -71,7 +71,10 @@ inline std::string vst2_plugin_source_identity(const std::string& path) {
     auto dll = so;
     dll.replace_extension(".dll");
     std::error_code ec;
-    if (fs::is_symlink(dll, ec) && !ec) {
+    // Centralized wrappers use a .dll symlink, while inline mode places
+    // the actual Windows DLL beside the bridge .so. Both represent the same
+    // plugin when the canonical source module is identical.
+    if (fs::is_regular_file(dll, ec) && !ec) {
         const auto target = fs::canonical(dll, ec);
         if (!ec) return "windows-vst2:" + target.string();
     }

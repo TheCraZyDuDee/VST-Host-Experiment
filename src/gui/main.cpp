@@ -1079,7 +1079,7 @@ private:
                     std::string error;
                     vst_host::audio::WindowsBridgeSelection selectedBridge;
                     if (!vst_host::audio::prepare_windows_vst3_plugins(
-                            bridgeOptions, error, &selectedBridge)) {
+                            bridgeOptions, error, &selectedBridge, &result.warning)) {
                         result.warning += error + "\n";
                     } else {
                         result.bridge = selectedBridge;

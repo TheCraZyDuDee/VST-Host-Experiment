@@ -467,6 +467,7 @@ public:
         nativeLayout->addWidget(nativeEditorHint_);
         showNativeEditorButton_ = new QPushButton(
             tr("Show plugin window (XWayland)"), nativePage);
+        showNativeEditorButton_->setObjectName(QStringLiteral("showXwaylandPluginWindow"));
         showNativeEditorButton_->setEnabled(false);
         showNativeEditorButton_->setToolTip(tr(
             "Available when a plug-in has opened a compatible XEmbed editor."));
@@ -661,6 +662,10 @@ public:
         }
         show();
         showNativeEditorButton_->setEnabled(false);
+        nativeEditorHint_->setText(tr(
+            "On Wayland, custom plugin interfaces open in a separate "
+            "XWayland window. This page can bring that window forward; "
+            "standard controls are available under Parameters."));
         editorNotice_->clear();
         editorNotice_->hide();
 #if defined(VST_HOST_HAVE_X11)
@@ -766,8 +771,14 @@ public:
         // On Wayland, the Plugin UI page remains clickable even if the
         // companion window is unavailable. Never leave an unexplained grey
         // tab: its text explains where the custom editor should appear.
-        tabs_->setTabEnabled(0, true);
-        tabs_->setCurrentIndex(showNativeEditorButton_->isEnabled() ? 0 : 1);
+#if defined(VST_HOST_HAVE_X11)
+        const bool usingXcb = QGuiApplication::platformName() == QStringLiteral("xcb");
+#else
+        constexpr bool usingXcb = false;
+#endif
+        tabs_->setTabEnabled(0, !usingXcb);
+        tabs_->setCurrentIndex(
+            !usingXcb && showNativeEditorButton_->isEnabled() ? 0 : 1);
         if (!showNativeEditorButton_->isEnabled() &&
             !editorNotice_->text().isEmpty())
             nativeEditorHint_->setText(editorNotice_->text());
@@ -2002,6 +2013,30 @@ int main(int argc, char** argv) {
                      "XEmbed editor support is not built (X11 headers were absent).\n");
         return 2;
 #endif
+    }
+    if (app.arguments().contains(QStringLiteral("--check-plugin-ui-tab"))) {
+        // Exercise the Wayland editor dialog without a loaded plugin or
+        // PipeWire server. The Plugin UI page must remain selectable and
+        // the XWayland focus button must be inactive until an editor opens.
+        PluginEditorDialog dialog(nullptr, {}, -1, {}, nullptr);
+        dialog.show();
+        QApplication::processEvents();
+        auto* tabs = dialog.findChild<QTabWidget*>();
+        auto* launch = dialog.findChild<QPushButton*>(
+            QStringLiteral("showXwaylandPluginWindow"));
+        const bool wayland =
+            QGuiApplication::platformName().startsWith(QStringLiteral("wayland"));
+        if (!wayland || !tabs || tabs->count() != 2 ||
+            !tabs->isTabEnabled(0) || !launch ||
+            !launch->isVisible() || launch->isEnabled()) {
+            std::fprintf(stderr, "Wayland Plugin UI dialog check failed.\n");
+            return 2;
+        }
+        tabs->setCurrentIndex(1);
+        tabs->setCurrentIndex(0);
+        std::puts("Wayland Plugin UI tab is accessible; "
+                  "external-editor launcher awaits a loaded plugin.");
+        return 0;
     }
     MainWindow window;
     window.show();

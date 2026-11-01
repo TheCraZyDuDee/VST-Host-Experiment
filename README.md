@@ -27,7 +27,7 @@ QT_QPA_PLATFORM=wayland ./build/vst-host-gui
 QT_QPA_PLATFORM=xcb ./build/vst-host-gui
 ```
 
-The first build fetches the pinned Steinberg VST3 SDK unless `-DVST3_SDK_ROOT=/path/to/vst3sdk` is provided. The Qt GUI runs natively under Wayland, including standard plugin parameter controls; third-party XEmbed editor interfaces still require X11/XWayland.
+The first build fetches the pinned Steinberg VST3 SDK unless `-DVST3_SDK_ROOT=/path/to/vst3sdk` is provided. The Qt GUI runs natively under Wayland, including standard plugin parameter controls. With X11/XWayland available, compatible third-party XEmbed editors open in a separate window while the Qt host stays on native Wayland. Running under Qt xcb still embeds those editors inside the dialog.
 
 **VST2 is optional.** It requires a **locally provided, appropriately licensed legacy VST2.4 SDK**; the repository does not ship or fetch it. Add `-DVST_HOST_ENABLE_VST2=ON -DVST2_SDK_ROOT=/path/to/vst2sdk` to the CMake configuration to enable VST2 effects.
 
@@ -50,7 +50,7 @@ Plugin settings, chain order, and host settings are retained between normal laun
 - Ordered native/Wine VST2 and VST3 effect chains, plugin browser/search, per-effect live bypass, built-in parameter controls, and state persistence.
 - PipeWire virtual microphone, stable input selection, hot-plug recovery, adjustable gain/latency, and audio buffer diagnostics.
 - Headless `vst-host` executable with `--config`, direct plugin paths, and recursive directory discovery.
-- **Current limits:** effects only (not VST2 instruments/MIDI), stereo microphone routing, no live add/remove/reorder during processing, and vendor-specific XEmbed editor windows require X11/XWayland. The main Qt GUI and standard host parameters work on native Wayland. Third-party plugin behavior varies.
+- **Current limits:** effects only (not VST2 instruments/MIDI), stereo microphone routing, no live add/remove/reorder during processing, and vendor-specific XEmbed editor windows require an X11/XWayland display, but can open alongside the native Wayland Qt host. Full native VST3 Wayland editor embedding is a separate workstream. Third-party plugin behavior varies. Third-party plugin behavior varies.
 
 ## Documentation
 

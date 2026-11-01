@@ -6,6 +6,7 @@
 #include "audio/windows_plugin_scope.hpp"
 #include "audio/vst3_processor.hpp"
 #include "gui/process_cpu_meter.hpp"
+#include "gui/profile_management.hpp"
 
 #include <QApplication>
 #include <QByteArray>
@@ -13,6 +14,10 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QDesktopServices>
+#include <QDir>
+#include <QFile>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QEvent>
@@ -20,6 +25,8 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QInputDialog>
+#include <QMenu>
 #include <QGroupBox>
 #include <QSplitter>
 #include <QShortcut>
@@ -45,6 +52,8 @@
 #include <QSet>
 #include <QPointer>
 #include <QTimer>
+#include <QUrl>
+#include <QUuid>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -819,7 +828,7 @@ struct PluginScanResult {
 
 class MainWindow final : public QMainWindow {
 public:
-    MainWindow() {
+    explicit MainWindow(bool startedAtLogin = false) : startedAtLogin_(startedAtLogin) {
         setWindowTitle(tr("VST Host Experiment"));
         resize(1080, 740);
         setMinimumSize(800, 560);

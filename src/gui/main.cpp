@@ -417,6 +417,10 @@ public:
         activeIndex_ = selectedIndex;
         selectorRow->addWidget(selector_, 1);
         layout->addLayout(selectorRow);
+        editorNotice_ = new QLabel(this);
+        editorNotice_->setWordWrap(true);
+        editorNotice_->hide();
+        layout->addWidget(editorNotice_);
         // The selector must never destroy/recreate its owning dialog while
         // QComboBox is finishing a popup selection: that caused a use-after-free.
         // Dispatch to the *main window* after the popup has fully closed.
@@ -459,9 +463,9 @@ public:
 #endif
         if (!hasX11Embedding) {
             tabs_->setTabEnabled(0, false);
-            tabs_->setTabToolTip(0, tr("This editor uses X11/XEmbed. "
-                "Host controls work on Wayland; launch with QT_QPA_PLATFORM=xcb "
-                "to use compatible plugin-specific interfaces."));
+            tabs_->setTabToolTip(0, tr("Custom XEmbed interfaces open in a "
+                "separate XWayland window when an X11 display is available. "
+                "Standard host controls remain in this Wayland dialog."));
             tabs_->setCurrentIndex(1);
         }
         // Synchronize host controls with edits made in the native plugin UI
@@ -474,14 +478,28 @@ public:
         auto* editorIdle = new QTimer(this);
         editorIdle->setInterval(50);
         connect(editorIdle, &QTimer::timeout, this, [this] {
-            if (attached_ && processor_ && tabs_->currentIndex() == 0)
+            if (!attached_ || !processor_) return;
+#if defined(VST_HOST_HAVE_X11)
+            // The standalone XWayland editor remains active even while its
+            // host parameter controls are displayed in the Qt Wayland dialog.
+            if (xembed_ && xembed_->standalone()) {
                 processor_->idle_editor();
+                return;
+            }
+#endif
+            if (tabs_->currentIndex() == 0) processor_->idle_editor();
         });
         editorIdle->start();
         resize(560, 400);
     }
 
     ~PluginEditorDialog() override { detachEditor(); }
+
+    void raisePluginEditor() {
+#if defined(VST_HOST_HAVE_X11)
+        if (xembed_) xembed_->raiseWindow();
+#endif
+    }
 
     void detachEditor() {
         // Discard old controls before releasing the editor controller. Their
@@ -589,7 +607,8 @@ protected:
     void changeEvent(QEvent* event) override {
         QDialog::changeEvent(event);
 #if defined(VST_HOST_HAVE_X11)
-        if (xembed_ && event->type() == QEvent::ActivationChange)
+        if (xembed_ && !xembed_->standalone() &&
+            event->type() == QEvent::ActivationChange)
             xembed_->setActive(isActiveWindow());
 #endif
     }
@@ -597,7 +616,7 @@ protected:
     void resizeEvent(QResizeEvent* event) override {
         QDialog::resizeEvent(event);
 #if defined(VST_HOST_HAVE_X11)
-        if (xembed_ && attached_)
+        if (xembed_ && !xembed_->standalone() && attached_)
             xembed_->resizeTo(surface_->width(), surface_->height());
 #endif
     }
@@ -610,6 +629,7 @@ public:
             return false;
         }
         show();
+        editorNotice_->hide();
 #if defined(VST_HOST_HAVE_X11)
         if (QGuiApplication::platformName() == QStringLiteral("xcb") &&
             processor_->has_native_editor()) {
@@ -648,19 +668,74 @@ public:
             tabs_->setCurrentIndex(0);
             return true;
         }
+
+        // Qt Wayland can coexist with a separate X11/XWayland top-level
+        // editor. The parent passed to the plugin is always an X11 window
+        // created by Xlib, never a wl_surface or a Qt Wayland winId().
+        if (QGuiApplication::platformName().startsWith(QStringLiteral("wayland")) &&
+            processor_->has_native_editor()) {
+            const char* display = std::getenv("DISPLAY");
+            if (display != nullptr && *display != '\0') {
+                xembed_ = std::make_unique<XEmbedSurface>(
+                    0, nullptr, true, [this] {
+                        QTimer::singleShot(0, this, [this] { close(); });
+                    });
+                if (xembed_->valid()) {
+                    int width = 0;
+                    int height = 0;
+                    std::string detail;
+                    auto* nativeParent = reinterpret_cast<void*>(
+                        static_cast<std::uintptr_t>(xembed_->window()));
+                    if (processor_->open_editor(nativeParent, width, height, detail)) {
+                        attached_ = true;
+                        xembed_->editorAttached();
+                        xembed_->resizeTo(std::max(1, width), std::max(1, height));
+                        xembed_->raiseWindow();
+                        editorNotice_->setText(tr("Custom plugin editor opened in a "
+                            "separate XWayland window. Closing this dialog also "
+                            "closes the plugin editor."));
+                        editorNotice_->show();
+                    } else {
+                        editorNotice_->setText(tr("Could not open the XWayland "
+                            "plugin editor: %1. Standard host controls remain "
+                            "available.").arg(QString::fromStdString(detail)));
+                        xembed_.reset();
+                    }
+                } else {
+                    editorNotice_->setText(
+                        tr("Could not connect to the X11/XWayland display: %1. "
+                           "Standard host controls remain available.")
+                            .arg(QString::fromStdString(xembed_->error())));
+                    xembed_.reset();
+                }
+            } else {
+                editorNotice_->setText(
+                    tr("No XWayland display is available (DISPLAY is unset). "
+                       "Custom X11 plugin editors need XWayland; standard host "
+                       "controls are still available."));
+            }
+        }
+#else
+        if (QGuiApplication::platformName().startsWith(QStringLiteral("wayland")) &&
+            processor_->has_native_editor())
+            editorNotice_->setText(
+                tr("This build does not include X11 editor support. "
+                   "Install X11 development headers and rebuild to use "
+                   "XWayland plugin windows."));
 #endif
-        // Native Wayland (or a build without X11) uses standard VST parameter
-        // controls. No Xlib call and no attempt to reinterpret a Wayland
-        // surface handle as an X11 Window ID is made here.
+        // Native Qt Wayland host controls remain usable even if the
+        // external XEmbed window cannot open or the plugin has no custom UI.
         tabs_->setTabEnabled(0, false);
         tabs_->setCurrentIndex(1);
         rebuildParameterPanel();
+        if (!editorNotice_->text().isEmpty()) editorNotice_->show();
         return true;
     }
 
 private:
     vst_host::audio::PluginProcessor* processor_{};
     QComboBox* selector_{};
+    QLabel* editorNotice_{};
     int activeIndex_{-1};
     bool windowInitialized_{false};
     QWidget* surface_{};
@@ -1561,6 +1636,7 @@ private:
             if (editorIndex_ == selectedIndex) {
                 editorDialog_->raise();
                 editorDialog_->activateWindow();
+                editorDialog_->raisePluginEditor();
                 return;
             }
             if (!engine_ || selectedIndex < 0) return;

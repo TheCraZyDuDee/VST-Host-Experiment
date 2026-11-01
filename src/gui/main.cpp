@@ -12,6 +12,8 @@
 #include <QDialog>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
+#include <QEvent>
+#include <QResizeEvent>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -25,6 +27,8 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSlider>
+#include <QTabWidget>
 #include <QFrame>
 #include <QSettings>
 #include <QPointer>
@@ -41,9 +45,11 @@
 #include <cstdlib>
 #include <memory>
 #include <future>
+#include <functional>
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <vector>
 #include <utility>
 
@@ -51,7 +57,8 @@ namespace {
 
 class XEmbedSurface final {
 public:
-    explicit XEmbedSurface(Window qtParent) {
+    explicit XEmbedSurface(Window qtParent, QWidget* focusOwner)
+        : focusOwner_(focusOwner) {
         display_ = XOpenDisplay(nullptr);
         if (!display_) {
             error_ = "Could not open the X11 display for the VST3 editor host.";
@@ -74,7 +81,8 @@ public:
                      parentAttributes.width, parentAttributes.height,
                      parentAttributes.x, parentAttributes.y);
         XSetWindowAttributes attributes{};
-        attributes.override_redirect = True;
+        // Use a normal X11 child: Wine editors may create focusable children.
+        attributes.override_redirect = False;
         window_ = XCreateWindow(display_, qtParent, 0, 0, 320, 180, 0, CopyFromParent,
                                 InputOutput, CopyFromParent, CWOverrideRedirect, &attributes);
         if (!window_) {
@@ -120,14 +128,33 @@ public:
                      "[VST3 XEmbed] VST3 attached() returned success; waiting for plugin child-window creation.\n");
     }
 
+    void focusPlugin() {
+        if (!valid() || children_.empty()) return;
+        if (focusOwner_) focusOwner_->setFocus(Qt::OtherFocusReason);
+        // XEmbed logical focus alone is insufficient for native key delivery.
+        XSetInputFocus(display_, children_.front(), RevertToParent, CurrentTime);
+        sendXEmbedMessage(children_.front(), 4); // XEMBED_FOCUS_IN
+        XFlush(display_);
+    }
+
+    void setActive(bool active) {
+        if (!valid() || children_.empty()) return;
+        for (const auto child : children_) {
+            sendXEmbedMessage(child, active ? 1 : 2); // WINDOW_ACTIVATE/DEACTIVATE
+            sendXEmbedMessage(child, active ? 4 : 5); // FOCUS_IN/OUT
+        }
+        XFlush(display_);
+    }
+
     void resizeTo(int width, int height) {
         lastWidth_ = std::max(1, width);
         lastHeight_ = std::max(1, height);
         if (!valid()) return;
         XResizeWindow(display_, window_, static_cast<unsigned int>(lastWidth_),
                       static_cast<unsigned int>(lastHeight_));
-        for (const auto child : children_) {
-            XMoveResizeWindow(display_, child, 0, 0,
+        // Never resize popup or auxiliary windows created by Wine.
+        if (!children_.empty()) {
+            XMoveResizeWindow(display_, children_.front(), 0, 0,
                               static_cast<unsigned int>(lastWidth_),
                               static_cast<unsigned int>(lastHeight_));
         }
@@ -161,8 +188,8 @@ private:
         message.xclient.data.l[0] = CurrentTime;
         message.xclient.data.l[1] = opcode;
         message.xclient.data.l[2] = 0;
-        message.xclient.data.l[3] = static_cast<long>(window_);
-        message.xclient.data.l[4] = embedVersion_;
+        message.xclient.data.l[3] = 0;
+        message.xclient.data.l[4] = 0;
         XSendEvent(display_, child, False, NoEventMask, &message);
     }
 
@@ -174,6 +201,8 @@ private:
             switch (event.type) {
             case CreateNotify:
                 if (event.xcreatewindow.parent == window_) {
+                    // Only the first direct child is the hosted editor.
+                    if (!children_.empty()) break;
                     const Window child = event.xcreatewindow.window;
                     children_.push_back(child);
                     std::fprintf(stderr,
@@ -215,6 +244,7 @@ private:
                     XSync(display_, False);
                     sendXEmbedMessage(child, 1); // XEMBED_WINDOW_ACTIVATE
                     sendXEmbedMessage(child, 4); // XEMBED_FOCUS_IN
+                    if (focusOwner_ && focusOwner_->hasFocus()) focusPlugin();
                     XWindowAttributes childAttributes{};
                     if (XGetWindowAttributes(display_, child, &childAttributes)) {
                         std::fprintf(stderr,
@@ -222,6 +252,25 @@ private:
                                      childAttributes.map_state, childAttributes.width,
                                      childAttributes.height);
                     }
+                }
+                break;
+            case ReparentNotify:
+                // Bridged plug-ins often create the editor in another X11
+                // process and reparent it into our socket. That does not
+                // generate CreateNotify on the socket: observe it explicitly.
+                if (event.xreparent.parent == window_ && children_.empty()) {
+                    const Window child = event.xreparent.window;
+                    children_.push_back(child);
+                    sendEmbeddedNotify(child);
+                    XMapWindow(display_, child);
+                    XMoveResizeWindow(display_, child, 0, 0,
+                                      static_cast<unsigned int>(lastWidth_),
+                                      static_cast<unsigned int>(lastHeight_));
+                    if (focusOwner_ && focusOwner_->hasFocus()) focusPlugin();
+                    XFlush(display_);
+                } else if (event.xreparent.parent != window_) {
+                    children_.erase(std::remove(children_.begin(), children_.end(),
+                                                event.xreparent.window), children_.end());
                 }
                 break;
             case MapRequest:
@@ -255,10 +304,16 @@ private:
                 break;
             }
             case FocusIn:
-                for (const auto child : children_) sendXEmbedMessage(child, 1);
+                setActive(true);
                 break;
             case FocusOut:
-                for (const auto child : children_) sendXEmbedMessage(child, 2);
+                setActive(false);
+                break;
+            case ClientMessage:
+                if (event.xclient.message_type == xembedAtom_ &&
+                    event.xclient.data.l[1] == 3) { // XEMBED_REQUEST_FOCUS
+                    focusPlugin();
+                }
                 break;
             case DestroyNotify:
                 children_.erase(std::remove(children_.begin(), children_.end(),
@@ -277,6 +332,7 @@ private:
         XFlush(display_);
     }
 
+    QWidget* focusOwner_{};
     Display* display_{};
     Window window_{};
     Atom xembedAtom_{};
@@ -295,22 +351,165 @@ private:
 class PluginEditorDialog final : public QDialog {
 public:
     explicit PluginEditorDialog(vst_host::audio::Vst3Processor* processor,
+                                const QStringList& effectNames, int selectedIndex,
+                                std::function<void(int)> selectEffect,
                                 QWidget* parent = nullptr)
         : QDialog(parent), processor_(processor) {
         setWindowTitle(tr("VST3 Plugin Editor"));
         auto* layout = new QVBoxLayout(this);
-        surface_ = new QWidget(this);
+        auto* selectorRow = new QHBoxLayout();
+        selectorRow->addWidget(new QLabel(tr("Edit effect:"), this));
+        selector_ = new QComboBox(this);
+        selector_->addItems(effectNames);
+        selector_->setCurrentIndex(selectedIndex);
+        activeIndex_ = selectedIndex;
+        selectorRow->addWidget(selector_, 1);
+        layout->addLayout(selectorRow);
+        // The selector must never destroy/recreate its owning dialog while
+        // QComboBox is finishing a popup selection: that caused a use-after-free.
+        // Dispatch to the *main window* after the popup has fully closed.
+        connect(selector_, QOverload<int>::of(&QComboBox::activated), this,
+                [this, parent, selectEffect = std::move(selectEffect)](int index) {
+                    if (!selectEffect || index == activeIndex_) return;
+                    // The current index is stored independently so it is only
+                    // changed after a successful editor switch.
+                    const QPointer<PluginEditorDialog> alive(this);
+                    QTimer::singleShot(75, parent, [alive, selectEffect, index] {
+                        if (alive) selectEffect(index);
+                    });
+                });
+        tabs_ = new QTabWidget(this);
+        auto* nativePage = new QWidget(tabs_);
+        auto* nativeLayout = new QVBoxLayout(nativePage);
+        nativeLayout->setContentsMargins(0, 0, 0, 0);
+        surface_ = new QWidget(nativePage);
         surface_->setAttribute(Qt::WA_NativeWindow);
+        surface_->setFocusPolicy(Qt::StrongFocus);
+        surface_->installEventFilter(this);
         surface_->setMinimumSize(320, 180);
-        layout->addWidget(surface_);
-        resize(480, 320);
+        nativeLayout->addWidget(surface_);
+        tabs_->addTab(nativePage, tr("Plugin UI"));
+        parameterScroll_ = new QScrollArea(tabs_);
+        parameterScroll_->setWidgetResizable(true);
+        tabs_->addTab(parameterScroll_, tr("Parameters (host controls)"));
+        layout->addWidget(tabs_);
+        resize(560, 400);
     }
 
-    ~PluginEditorDialog() override {
-        if (processor_ != nullptr && attached_) {
-            processor_->close_editor();
-        }
+    ~PluginEditorDialog() override { detachEditor(); }
+
+    void detachEditor() {
+        // Discard old controls before releasing the editor controller. Their
+        // valueChanged handlers must not call a destroyed controller.
+        if (parameterScroll_) delete parameterScroll_->takeWidget();
+        if (processor_ != nullptr && attached_) processor_->close_editor();
+        attached_ = false;
+        xembed_.reset();
     }
+
+    void rebuildParameterPanel() {
+        if (!parameterScroll_ || !processor_) return;
+        auto* panel = new QWidget(parameterScroll_);
+        auto* controls = new QVBoxLayout(panel);
+        auto* hint = new QLabel(
+            tr("Host-provided controls for VST3 parameters. If a Wine editor draws "
+               "but ignores mouse input, try these sliders instead. Some plugins "
+               "do not expose every custom control as a VST3 parameter."), panel);
+        hint->setWordWrap(true);
+        controls->addWidget(hint);
+
+        const auto parameters = processor_->editor_parameters();
+        if (parameters.empty()) {
+            auto* empty = new QLabel(
+                tr("This effect did not report any standard VST3 parameters."), panel);
+            empty->setWordWrap(true);
+            controls->addWidget(empty);
+        }
+
+        for (const auto& parameter : parameters) {
+            auto* row = new QWidget(panel);
+            auto* line = new QHBoxLayout(row);
+            line->setContentsMargins(2, 2, 2, 2);
+            QString name = QString::fromStdU16String(parameter.name);
+            if (name.isEmpty()) name = tr("Parameter %1").arg(parameter.id);
+            auto* label = new QLabel(name, row);
+            label->setMinimumWidth(155);
+            line->addWidget(label);
+
+            auto* slider = new QSlider(Qt::Horizontal, row);
+            const int steps = parameter.step_count > 0 && parameter.step_count <= 4096
+                ? parameter.step_count : 1000;
+            slider->setRange(0, steps);
+            slider->setValue(static_cast<int>(std::lround(
+                std::clamp(parameter.normalized_value, 0.0, 1.0) * steps)));
+            slider->setEnabled(!parameter.read_only);
+            line->addWidget(slider, 1);
+            auto* valueLabel = new QLabel(
+                QString::number(parameter.normalized_value, 'f', 3), row);
+            valueLabel->setMinimumWidth(50);
+            line->addWidget(valueLabel);
+            connect(slider, &QSlider::valueChanged, row,
+                    [this, id = parameter.id, steps, valueLabel](int value) {
+                const double normalized = static_cast<double>(value) / steps;
+                valueLabel->setText(QString::number(normalized, 'f', 3));
+                if (processor_) (void)processor_->set_editor_parameter(id, normalized);
+            });
+            controls->addWidget(row);
+        }
+        controls->addStretch();
+        parameterScroll_->setWidget(panel);
+    }
+
+    bool switchProcessor(vst_host::audio::Vst3Processor* processor, int index,
+                         QString& error) {
+        if (!processor) {
+            error = tr("The requested effect is not ready.");
+            selector_->setCurrentIndex(activeIndex_);
+            return false;
+        }
+        // Keep this Qt dialog and its selector alive. Only the embedded VST3
+        // view and X11 socket are replaced, avoiding the combo box UAF.
+        auto* previousProcessor = processor_;
+        const int previousIndex = activeIndex_;
+        detachEditor();
+        processor_ = processor;
+        if (!attachEditor(error)) {
+            // Restore the previous view if the requested editor cannot attach.
+            // Otherwise the selector and audio-chain selection would disagree.
+            detachEditor();
+            processor_ = previousProcessor;
+            QString restorationError;
+            (void)attachEditor(restorationError);
+            activeIndex_ = previousIndex;
+            selector_->setCurrentIndex(previousIndex);
+            return false;
+        }
+        activeIndex_ = index;
+        selector_->setCurrentIndex(index);
+        return true;
+    }
+
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (watched == surface_ && xembed_ &&
+            event->type() == QEvent::MouseButtonPress)
+            xembed_->focusPlugin();
+        return QDialog::eventFilter(watched, event);
+    }
+
+    void changeEvent(QEvent* event) override {
+        QDialog::changeEvent(event);
+        if (xembed_ && event->type() == QEvent::ActivationChange)
+            xembed_->setActive(isActiveWindow());
+    }
+
+    void resizeEvent(QResizeEvent* event) override {
+        QDialog::resizeEvent(event);
+        if (xembed_ && attached_)
+            xembed_->resizeTo(surface_->width(), surface_->height());
+    }
+
+public:
 
     bool attachEditor(QString& error) {
         if (processor_ == nullptr) {
@@ -319,13 +518,16 @@ public:
         }
         show();
         surface_->show();
-        QApplication::processEvents();
+        if (!attached_ && !windowInitialized_) {
+            QApplication::processEvents();
+            windowInitialized_ = true;
+        }
 
         int width = 0;
         int height = 0;
         std::string detail;
         const auto nativeId = static_cast<Window>(surface_->winId());
-        xembed_ = std::make_unique<XEmbedSurface>(nativeId);
+        xembed_ = std::make_unique<XEmbedSurface>(nativeId, surface_);
         if (!xembed_->valid()) {
             error = QString::fromStdString(xembed_->error());
             return false;
@@ -341,12 +543,21 @@ public:
         surface_->resize(width, height);
         xembed_->resizeTo(width, height);
         resize(width + 24, height + 48);
+        surface_->setFocus(Qt::OtherFocusReason);
+        xembed_->setActive(isActiveWindow());
+        xembed_->focusPlugin();
+        rebuildParameterPanel();
         return true;
     }
 
 private:
     vst_host::audio::Vst3Processor* processor_{};
+    QComboBox* selector_{};
+    int activeIndex_{-1};
+    bool windowInitialized_{false};
     QWidget* surface_{};
+    QTabWidget* tabs_{};
+    QScrollArea* parameterScroll_{};
     std::unique_ptr<XEmbedSurface> xembed_;
     bool attached_{false};
 };
@@ -395,8 +606,12 @@ public:
         chainList_->setMinimumHeight(130);
         chainList_->setSelectionMode(QAbstractItemView::SingleSelection);
         chainList_->setDragDropMode(QAbstractItemView::InternalMove);
+        chainList_->setToolTip(tr("Select an active effect; double-click it to open its editor while audio runs."));
         root->addWidget(new QLabel(tr("Processing chain (top to bottom)"), central));
         root->addWidget(chainList_, 1);
+        selectedPluginLabel_ = new QLabel(tr("No effect selected"), central);
+        selectedPluginLabel_->setWordWrap(true);
+        root->addWidget(selectedPluginLabel_);
         auto* chainActions = new QHBoxLayout();
         removePluginButton_ = new QPushButton(tr("Remove selected"), central);
         moveUpButton_ = new QPushButton(tr("Move up"), central);
@@ -407,12 +622,12 @@ public:
         root->addLayout(chainActions);
 
         auto* configActions = new QHBoxLayout();
-        auto* loadConfigButton = new QPushButton(tr("Load configuration…"), central);
+        loadConfigButton_ = new QPushButton(tr("Load configuration…"), central);
         auto* saveConfigButton = new QPushButton(tr("Save configuration…"), central);
-        configActions->addWidget(loadConfigButton);
+        configActions->addWidget(loadConfigButton_);
         configActions->addWidget(saveConfigButton);
         root->addLayout(configActions);
-        connect(loadConfigButton, &QPushButton::clicked, this, [this] { loadConfiguration(); });
+        connect(loadConfigButton_, &QPushButton::clicked, this, [this] { loadConfiguration(); });
         connect(saveConfigButton, &QPushButton::clicked, this, [this] { saveConfiguration(); });
 
         root->addWidget(new QLabel(tr("Plugin search directories (Linux and Wine)"), central));
@@ -489,7 +704,7 @@ public:
         auto* actions = new QHBoxLayout();
         startButton_ = new QPushButton(tr("Start audio"), central);
         stopButton_ = new QPushButton(tr("Stop audio"), central);
-        editorButton_ = new QPushButton(tr("Open plugin editor"), central);
+        editorButton_ = new QPushButton(tr("Edit selected effect"), central);
         stopButton_->setEnabled(false);
         editorButton_->setEnabled(false);
         actions->addWidget(startButton_);
@@ -539,6 +754,10 @@ public:
         connect(startButton_, &QPushButton::clicked, this, [this] { startAudio(); });
         connect(stopButton_, &QPushButton::clicked, this, [this] { stopAudio(); });
         connect(editorButton_, &QPushButton::clicked, this, [this] { openEditor(); });
+        connect(chainList_, &QListWidget::currentRowChanged, this,
+                [this](int) { updateSelectedPlugin(); });
+        connect(chainList_, &QListWidget::itemDoubleClicked, this,
+                [this](QListWidgetItem*) { if (editorButton_->isEnabled()) openEditor(); });
 
         pollTimer_ = new QTimer(this);
         pollTimer_->setInterval(200);
@@ -586,7 +805,11 @@ private:
     }
 
     void setEditingEnabled(bool enabled) {
-        chainList_->setEnabled(enabled);
+        // Freeze reordering while the engine runs but keep rows selectable:
+        // selecting the next plugin must not require restarting the audio.
+        chainList_->setEnabled(enabled || engine_ != nullptr);
+        chainList_->setDragDropMode(enabled
+            ? QAbstractItemView::InternalMove : QAbstractItemView::NoDragDrop);
         availablePlugins_->setEnabled(enabled);
         addPluginButton_->setEnabled(enabled);
         addSelectedPluginButton_->setEnabled(enabled);
@@ -599,6 +822,7 @@ private:
         addWindowsDirectoryButton_->setEnabled(enabled);
         removeDirectoryButton_->setEnabled(enabled);
         scanDirectoriesButton_->setEnabled(enabled);
+        loadConfigButton_->setEnabled(enabled);
     }
 
     void loadSettings() {
@@ -776,6 +1000,7 @@ private:
     }
 
     void loadConfiguration() {
+        if (engine_ || pluginScanPending_) return;
         const auto path = QFileDialog::getOpenFileName(
             this, tr("Load host configuration"), QString(),
             tr("VST Host configuration (*.vsthost);;All files (*)"));
@@ -835,6 +1060,7 @@ private:
         options.windows_plugin_directories.clear();
 
         previousDiagnostics_ = {};
+        engineReadyShown_ = false;
         engine_ = std::make_unique<vst_host::audio::PipeWireEngine>(std::move(options));
         engineFinished_.store(false, std::memory_order_release);
         engineResult_ = 0;
@@ -851,10 +1077,7 @@ private:
     }
 
     void stopAudio() {
-        if (editorDialog_) {
-            editorDialog_->close();
-            editorDialog_ = nullptr;
-        }
+        closeEditorDialog();
         if (engine_) engine_->request_stop();
         if (worker_.joinable()) worker_.join();
         engine_.reset();
@@ -863,11 +1086,55 @@ private:
         setEditingEnabled(true);
         editorButton_->setEnabled(false);
         status_->setText(tr("Audio engine stopped."));
+        updateSelectedPlugin();
         saveSettings();
     }
 
+    void closeEditorDialog() {
+        if (!editorDialog_) return;
+        auto* dialog = editorDialog_.data();
+        editorDialog_ = nullptr;
+        editorIndex_ = -1;
+        dialog->detachEditor(); // release native editor before stopping the engine
+        dialog->close();
+    }
+
+    void updateSelectedPlugin() {
+        const auto* item = chainList_->currentItem();
+        selectedPluginLabel_->setText(item
+            ? tr("Selected: %1 — double-click to edit while running")
+                .arg(QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName() +
+                     (item->data(Qt::UserRole + 1).toBool() ? tr(" (WINE)") : QString()))
+            : tr("No effect selected"));
+        const bool ready = engine_ && engine_->plugin_processor() != nullptr &&
+            chainList_->currentRow() >= 0 &&
+            static_cast<std::size_t>(chainList_->currentRow()) < engine_->plugin_count();
+        editorButton_->setEnabled(ready);
+    }
+
     void openEditor() {
+        const int selectedIndex = chainList_->currentRow();
         if (editorDialog_) {
+            if (editorIndex_ == selectedIndex) {
+                editorDialog_->raise();
+                editorDialog_->activateWindow();
+                return;
+            }
+            if (!engine_ || selectedIndex < 0) return;
+            auto* next = engine_->plugin_processor(static_cast<std::size_t>(selectedIndex));
+            QString error;
+            if (!editorDialog_->switchProcessor(next, selectedIndex, error)) {
+                // The dialog recovered the previous view; keep the main-chain
+                // highlight consistent with the editor it is actually showing.
+                chainList_->setCurrentRow(editorIndex_);
+                QMessageBox::warning(this, tr("Could not switch plugin editor"), error);
+                return;
+            }
+            editorIndex_ = selectedIndex;
+            editorDialog_->setWindowTitle(tr("Effect %1: %2")
+                .arg(selectedIndex + 1)
+                .arg(QFileInfo(chainList_->item(selectedIndex)
+                    ->data(Qt::UserRole).toString()).completeBaseName()));
             editorDialog_->raise();
             editorDialog_->activateWindow();
             return;
@@ -880,8 +1147,7 @@ private:
                     .arg(QGuiApplication::platformName()));
             return;
         }
-        if (!engine_) return;
-        const int selectedIndex = chainList_->currentRow();
+        if (!engine_ || engine_->plugin_processor() == nullptr) return;
         if (selectedIndex < 0) {
             QMessageBox::information(this, tr("Select a plugin"),
                                      tr("Select a chain entry to open its editor."));
@@ -894,7 +1160,23 @@ private:
             return;
         }
 
-        auto* dialog = new PluginEditorDialog(processor, this);
+        QStringList effectNames;
+        for (int i = 0; i < chainList_->count(); ++i) {
+            auto* item = chainList_->item(i);
+            effectNames << tr("%1. %2%3")
+                .arg(i + 1)
+                .arg(QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName())
+                .arg(item->data(Qt::UserRole + 1).toBool() ? tr(" (WINE)") : QString());
+        }
+        auto* dialog = new PluginEditorDialog(processor, effectNames, selectedIndex,
+            [this](int index) {
+                if (!engine_ || index < 0 || index >= chainList_->count()) return;
+                chainList_->setCurrentRow(index);
+                openEditor();
+            }, this);
+        if (auto* item = chainList_->item(selectedIndex))
+            dialog->setWindowTitle(tr("Effect %1: %2").arg(selectedIndex + 1).arg(
+                QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName()));
         QString error;
         if (!dialog->attachEditor(error)) {
             dialog->close();
@@ -903,8 +1185,14 @@ private:
             return;
         }
         editorDialog_ = dialog;
+        editorIndex_ = selectedIndex;
         dialog->setAttribute(Qt::WA_DeleteOnClose);
-        connect(dialog, &QDialog::finished, this, [this] { editorDialog_ = nullptr; });
+        connect(dialog, &QDialog::finished, this, [this, dialog] {
+            if (editorDialog_ == dialog) {
+                editorDialog_ = nullptr;
+                editorIndex_ = -1;
+            }
+        });
     }
 
     QString inputTargetValue() const {
@@ -970,10 +1258,7 @@ private:
         if (!engine_) return;
         if (engineFinished_.load(std::memory_order_acquire)) {
             const auto engineError = engine_->last_error();
-            if (editorDialog_) {
-                editorDialog_->close();
-                editorDialog_ = nullptr;
-            }
+            closeEditorDialog();
             if (worker_.joinable()) worker_.join();
             engine_.reset();
             startButton_->setEnabled(true);
@@ -1007,8 +1292,11 @@ private:
                 .arg(static_cast<qulonglong>(stats.stale_frames))
                 .arg(static_cast<qulonglong>(newStale)));
         if (engine_->plugin_processor() != nullptr) {
-            editorButton_->setEnabled(chainList_->currentRow() >= 0);
-            status_->setText(tr("Audio is running. Plugin editor is available."));
+            updateSelectedPlugin();
+            if (!engineReadyShown_) {
+                status_->setText(tr("Audio is running. Select or double-click a chain effect to edit it."));
+                engineReadyShown_ = true;
+            }
         }
     }
 
@@ -1026,6 +1314,7 @@ private:
     QPushButton* addWindowsDirectoryButton_{};
     QPushButton* removeDirectoryButton_{};
     QPushButton* scanDirectoriesButton_{};
+    QPushButton* loadConfigButton_{};
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};
     QPushButton* moveDownButton_{};
@@ -1037,6 +1326,7 @@ private:
     QPushButton* startButton_{};
     QPushButton* stopButton_{};
     QPushButton* editorButton_{};
+    QLabel* selectedPluginLabel_{};
     QLabel* status_{};
     QLabel* diagnostics_{};
     QTimer* pollTimer_{};
@@ -1048,6 +1338,8 @@ private:
     std::atomic<bool> engineFinished_{false};
     int engineResult_{0};
     QPointer<PluginEditorDialog> editorDialog_;
+    int editorIndex_{-1};
+    bool engineReadyShown_{false};
 };
 
 } // namespace

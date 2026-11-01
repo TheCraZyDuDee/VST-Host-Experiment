@@ -4,6 +4,8 @@
 
 #include <memory>
 #include <string>
+#include <vector>
+#include <cstdint>
 
 namespace vst_host::audio {
 
@@ -20,6 +22,18 @@ public:
     bool load(std::string& error);
     bool open_editor(void* native_parent, int& width, int& height, std::string& error);
     void close_editor() noexcept;
+
+    // Called from the GUI thread while the editor is open. Parameter edits
+    // are transferred to the real-time thread using a bounded SPSC queue.
+    struct ParameterInfo {
+        std::uint32_t id{};
+        std::u16string name;
+        double normalized_value{};
+        std::int32_t step_count{};
+        bool read_only{};
+    };
+    [[nodiscard]] std::vector<ParameterInfo> editor_parameters() const;
+    bool set_editor_parameter(std::uint32_t id, double normalized_value);
     bool prepare(const AudioProcessSpec& spec) override;
     void process(float* interleaved_samples, std::size_t frames) noexcept override;
     void reset() noexcept override;

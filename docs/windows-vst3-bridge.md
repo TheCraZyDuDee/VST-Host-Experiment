@@ -1,196 +1,58 @@
-# Windows VST2/VST3 bridging: vstbridge preferred, yabridge fallback
+# Windows VST2/VST3 plugins (Wine bridge)
 
-## Decision
+The host uses [vstbridge](https://github.com/rations/vstbridge) by default, or [yabridge](https://github.com/robbert-vdh/yabridge) as a fallback, to load Windows VST2/VST3 effects through Wine. These are **external tools**; the host does not install, download, or bundle them.
 
-**Prefer [vstbridge](https://github.com/rations/vstbridge) for Windows VST2/VST3
-plugins**, with [yabridge](https://github.com/robbert-vdh/yabridge) as a
-compatibility fallback. Both are optional external applications, not bundled,
-downloaded, or installed by the VST Host Experiment.
+## Setup
 
-The native host still uses the same C++ VST3 processor and PipeWire engine.
-A Wine bridge produces Linux VST3 wrappers, which the host discovers and
-loads through its existing processor chain. Wine and the plugin processes
-remain external. Native Linux VST3 effects need neither bridge.
+1. Install Wine and a bridge by following its upstream instructions. Verify that `vstbridgectl` (or `yabridgectl`) runs.
+2. In the GUI, use **Add Windows directory…** to choose a Windows plugin folder and click **Scan all**.
+3. Select its generated effects from **Available plugins** and add them to the chain. They show `(VST2) (WINE)` or `(VST3) (WINE)`.
 
-This changes the **bridge backend**, not the `.vsthost` file format: the
-`windows_plugin_directory` keys still point to Windows plug-in directories.
+Windows VST2 requires a build with **VST2 enabled**; VST3 requires VST3 hosting. See [Getting started](getting-started.md) for build options and [Plugins](plugins.md) for format support.
 
-## Why vstbridge
+The bridge generates native Linux wrappers, typically under:
 
-- vstbridge is an actively updated yabridge fork. Version **0.0.4**, released
-  October 28, 2026, contains compatibility changes for recent Wine versions
-  and multi-monitor editor input fixes. The 0.0.4 notes mention Wine 11.20
-  on ARM, but do not establish that the user's x86_64 plugin combination works.
-- It specifically implements a Windows-side XEmbed coordinate correction
-  for the failure in which a VST3 GUI renders but ignores mouse input.
-- `vstbridgectl` supports the same `add`, `sync`, and `status` commands
-  already used by our engine.
-- The fork installs its VST3 wrappers into `~/.vst3/vstbridge/`, separate
-  from yabridge's `~/.vst3/yabridge/`.
-- Wine GUI interaction remains plugin-, Wine-, desktop-, and bridge-dependent.
-  Compatibility with RNNoise and Supertone Clear still requires testing.
+| Bridge | VST2 wrappers | VST3 wrappers |
+| --- | --- | --- |
+| vstbridge | `~/.vst/vstbridge/` | `~/.vst3/vstbridge/` |
+| yabridge | `~/.vst/yabridge/` | `~/.vst3/yabridge/` |
 
-See:
-- [vstbridge project](https://github.com/rations/vstbridge)
-- [vstbridge 0.0.4 release](https://github.com/rations/vstbridge/releases/tag/v0.0.4)
-- [yabridge changelog](https://github.com/robbert-vdh/yabridge/blob/master/CHANGELOG.md)
+Some installations use **inline VST2 wrappers**, placing a generated `.so` beside the original `.dll`. The host supports centralized and inline layouts.
 
-## Install and migration
+## Which bridge is used?
 
-Install vstbridge separately using the instructions and architecture-specific
-release package in the upstream release. The project's installer normally
-puts `vstbridgectl` under `~/.local/share/vstbridge/vstbridgectl`.
-Do **not** rename yabridge's installed binaries or symlink its directories
-into vstbridge: their runtime libraries and configuration files are separate.
+An explicit `VSTBRIDGECTL` path takes priority, followed by an explicit `YABRIDGECTL` path. Otherwise the host looks for vstbridge in its usual installation directory or `PATH`, then yabridge. An invalid explicit override is an error, not a reason to silently switch backend.
 
-VST Host Experiment finds the bridge control tool in this order:
+For example:
 
-1. A valid explicit `VSTBRIDGECTL` path or executable, if specified.
-2. A valid explicit `YABRIDGECTL` path or executable, if specified.
-3. `~/.local/share/vstbridge/vstbridgectl` or `vstbridgectl` on `PATH`.
-4. `~/.local/share/yabridge/yabridgectl` or `yabridgectl` on `PATH`.
-
-An explicit but invalid override is an error, not permission to silently use
-a different bridge. The process uses `posix_spawnp` with an argument vector;
-plugin directory paths are never shell-interpolated.
-
-The GUI's single Linux/Windows directory list and portable configuration keys
-are unchanged. On **Scan all**, Windows directories are registered with the
-selected tool and synchronized in a background worker. Native wrappers appear
-in the available-plugin browser with the `(WINE)` label. The GUI status
-identifies the active bridge.
-
-Existing chain entries pointing at `~/.vst3/yabridge/...` are migrated to the
-equivalent path under the selected vstbridge wrapper directory **only if that
-new path already exists**. The reverse migration is supported for an explicit
-yabridge fallback. This preserves the order and number of effect instances.
-If no equivalent wrapper exists, the original path is kept; users can
-re-scan, confirm synchronization, and re-add the effect explicitly. CLI
-chains containing explicit wrapper paths are migrated on startup when
-Windows directories were configured and synchronized.
-
-**Important:** Per-plugin VST3 and (when built with an appropriate legacy
-SDK) VST2 state is saved separately from plugin paths. The automatic wrapper
-path migration preserves the chain entry's stored state but cannot guarantee
-that a different version of the bridged plug-in accepts the same snapshot. yabridge and vstbridge have distinct global
-configuration and plugin wrapper directories. Removing a Windows search
-directory from our UI does not unregister it from the external bridge.
-
-## Selected Windows directory scope
-
-**vstbridgectl and yabridgectl use a global plugin registry shared with other
-audio applications.** Calling `sync` updates wrappers for all registered
-roots, not just the folder selected in VST Host Experiment. Previously the
-host then scanned all wrappers under `~/.vst3/vstbridge/` and (with VST2
-enabled) `~/.vst/vstbridge/`, so selecting `Windows/VST2` incorrectly showed
-effects from sibling `Windows/VST3` and unrelated global roots.
-
-The host now **filters bridge-derived scan results by their original
-Windows modules**, resolved through the VST2 wrapper's adjacent
-`.dll` symlink or the VST3 wrapper's
-`Contents/*-win/*.vst3` symlink. VST2 inline wrappers next to an original
-`.dll`, and VST3 inline bundles with installed native Linux `.so` modules,
-are supported too. Only originals within the **Windows directories explicitly
-configured in this host** appear in the automatic browser results or CLI
-auto-discovered chain. Path comparisons use resolved, component-aware
-directory relationships: selecting `VST2` cannot include sibling `VST3`
-or `VST2-Other` entries. Selecting their common parent intentionally
-includes both subdirectories recursively.
-
-Explicitly added plugins and existing active-chain effects are retained,
-including those outside current scan roots. Removing a Windows directory from
-the host does not revoke existing selections, change the global external
-bridge registry, or delete wrapper files. The GUI scan status reports how many
-bridge wrappers were excluded because their originals are outside the
-selected Windows roots. Broken wrappers without a resolvable original module
-are omitted from automatic bridge discovery; add such a wrapper explicitly
-only after correcting its installation.
-
-## Duplicate Windows VST3 plugins and overlapping search roots
-
-vstbridge and yabridge keep a **global** list of Windows plugin directories
-that is shared with other DAWs. Their sync tools mirror each registered
-directory's relative layout into the native wrapper directory. Registering
-both `.../Windows Plugins` **and** its `.../Windows Plugins/VST3` child can
-create two wrapper bundles for one physical Windows plugin, for example:
-
-```text
-~/.vst3/vstbridge/rnnoise.vst3
-~/.vst3/vstbridge/VST3/rnnoise.vst3
+```sh
+VSTBRIDGECTL="$HOME/.local/share/vstbridge/vstbridgectl" \
+  QT_QPA_PLATFORM=xcb ./build/vst-host-gui
 ```
 
-These wrappers may contain different Linux `.so` file paths but reference
-the **same original Windows VST3 module** through the symlinks inside
-`Contents/x86_64-win`. Path-based deduplication is insufficient.
+The host registers selected Windows folders with the chosen bridge (avoiding redundant nested registrations), runs its `sync` command **before audio starts**, and discovers the Linux wrappers. Saved wrapper paths are migrated between bridges only when an equivalent wrapper exists; other chain entries remain unchanged.
 
-The host now protects against this at two levels:
+## Directory selection and duplicates
 
-- On a GUI scan, collapse aliases that resolve to the same original Windows
-  module, including aliases found through saved chains or Linux scan roots.
-  Prefer a shorter stable wrapper path. The UI reports how many duplicate
-  library entries it hid. **Explicitly chosen duplicate instances in a
-  processing chain remain untouched**.
-- When adding Windows search directories to the bridge, first query
-  `vstbridgectl list` (or `yabridgectl list`) and skip registration of
-  a child already covered by an existing registered parent. When both roots
-  are configured in one scan, add the parent first and skip its child. If
-  the global bridge configuration already contains overlapping roots, show
-  a warning but **do not alter it**. The headless auto-loader also avoids
-  loading two discovered wrappers for one Windows module.
+**The bridge maintains a global directory registry**, shared by other audio applications. `sync` processes all its registered roots. **VST Host Experiment nevertheless shows only automatically discovered Windows plugins whose original DLL/VST3 module is inside a Windows directory selected in this app.** Selecting `Windows/VST2` excludes the sibling `Windows/VST3`; selecting their common parent includes both recursively.
 
-### Cleaning up existing duplicated wrappers (manual)
+A plugin you added manually or already put in the active chain remains selected even if its source directory is later removed from this app. This is intentional.
 
-First, verify the globally registered roots and keep **one** suitable
-directory that contains the desired Windows VST3 plugins:
+Registering overlapping roots (for example, both `Windows` and `Windows/VST3`) can create duplicate wrapper bundles. The host identifies aliases by their original Windows module and shows only one available-plugin entry; it does **not** remove existing wrapper files or change the bridge's shared registry.
+
+To inspect registered directories:
 
 ```sh
 vstbridgectl list
+# Or: yabridgectl list
 ```
 
-If that output shows both a parent and its `VST3` subdirectory, remove
-**only the redundant registration** after checking whether other DAWs use it:
+If you decide to clean up overlapping registrations, check other hosts first. Then remove **only** the redundant root with the control tool's `rm` command and run `sync --prune`. **Caution:** pruning may delete globally managed wrappers used by other applications. No manual cleanup is required just to use the host's filtered plugin browser.
 
-```sh
-# Example only — replace with the exact redundant path shown by 'list'.
-vstbridgectl rm "/path/to/Windows Plugins"
-vstbridgectl sync --prune
-```
+## Limitations
 
-Do not run `rm` blindly or delete folders under `~/.vst3/vstbridge`
-manually: `sync --prune` can remove globally managed wrappers that no
-longer match the registered paths, including wrappers used by other hosts.
-Also remove the redundant Windows search directory from VST Host
-Experiment's own directory list if it is present, or the next Scan all
-may register it again. If the problem only affects the browser and you
-want to keep all existing registrations, **no cleanup is required**; the
-host hides equivalent aliases without touching files.
+- Windows editors depend on Wine, the bridge, and X11/XWayland. Try `QT_QPA_PLATFORM=xcb` if the editor cannot embed; for drawing/input issues, the **Parameters (host controls)** tab is a fallback. DXVK may help some Wine plugins that fail to repaint.
+- Bridge operations occur outside the real-time audio callback, but external plugins can still crash or misbehave; there is no general plugin-crash isolation guarantee.
+- This project does not redistribute vstbridge, yabridge, Wine, or proprietary plugin binaries.
 
-The same commands work with `yabridgectl` if yabridge is explicitly
-selected. Distinct Windows modules with the same display name remain
-separate because deduplication uses canonical module targets, not names.
-
-## Runtime behavior
-
-The bridge must be prepared before PipeWire audio starts. No bridge launch,
-plugin scan, Wine initialization, filesystem traversal, or wrapper allocation
-happens inside the real-time processing callback. The GUI starts only plugins
-selected in the active chain; discovery never auto-activates every wrapper.
-The CLI retains its documented directory-discovery/auto-loading behavior.
-
-Status and preparation errors from the selected bridge are surfaced in the
-GUI or CLI. Native Linux plug-ins remain unaffected if no Windows directories
-are configured. The host does not download or install either bridge.
-
-## Limitations and follow-ups
-
-- The vstbridge 0.0.4 release was reviewed, not executed on the user's Linux
-  workstation here. Test RNNoise and Supertone Clear with Wine 11.20.
-- Runtime Wine process crashes, audio xruns, plugin state snapshots, editor
-  resize semantics, and hot-swapping bridge backends need further validation.
-- The host's UI is Qt6/X11 (or XWayland via `QT_QPA_PLATFORM=xcb`); there is
-  no Wayland-native editor embedding.
-- The host-provided **Parameters** tab remains a supported workaround when
-  a plug-in's graphical editor ignores clicks, regardless of bridge.
-- vstbridge and yabridge are GPL-licensed third-party applications. They
-  remain external runtime dependencies; this repository does not embed
-  or redistribute their code.
+For step-by-step problem diagnosis, see [Troubleshooting](troubleshooting.md).

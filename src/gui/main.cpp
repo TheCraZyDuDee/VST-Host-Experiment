@@ -1224,7 +1224,7 @@ private:
                             if (entry.second)
                                 entry.first = vst_host::audio::plugin_format(entry.first) ==
                                     vst_host::audio::PluginFormat::Vst2
-                                    ? vst_host::audio::detail::migrate_vst2_wrapper_path(
+                                    ? vst_host::audio::migrate_vst2_wrapper_path(
                                         entry.first, selectedBridge)
                                     : vst_host::audio::detail::migrate_vst3_wrapper_path(
                                         entry.first, selectedBridge);

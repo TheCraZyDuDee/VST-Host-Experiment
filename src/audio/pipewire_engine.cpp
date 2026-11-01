@@ -19,6 +19,7 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 namespace vst_host::audio {
@@ -415,10 +416,17 @@ int PipeWireEngine::run() {
     if (preloaded_plugins.empty() && impl_->options.preloaded_plugin)
         preloaded_plugins.push_back(impl_->options.preloaded_plugin);
     std::string scan_warning;
-    const auto discovered_plugins = discover_vst3_plugins(impl_->options.plugin_directories, &scan_warning);
+    const auto discovered_plugins = deduplicate_discovered_vst3_plugins(
+        discover_vst3_plugins(impl_->options.plugin_directories, &scan_warning));
     if (!scan_warning.empty()) std::fprintf(stderr, "%s", scan_warning.c_str());
+    // Keep intentional repeated explicit plugin instances, but never append
+    // discovered bridge aliases whose original Windows module is already
+    // represented in the CLI chain. This also covers overlapping scan roots.
+    std::unordered_set<std::string> known_modules;
+    for (const auto& path : plugin_paths)
+        known_modules.insert(vst3_plugin_source_identity(path));
     for (const auto& path : discovered_plugins) {
-        if (std::find(plugin_paths.begin(), plugin_paths.end(), path) == plugin_paths.end())
+        if (known_modules.insert(vst3_plugin_source_identity(path)).second)
             plugin_paths.push_back(path);
     }
     if (preloaded_plugins.size() > plugin_paths.size()) {

@@ -964,16 +964,62 @@ public:
         chainActions->addWidget(moveDownButton_);
         chainLayout->addLayout(chainActions);
 
-        auto* configActions = new QHBoxLayout();
-        loadConfigButton_ = new QPushButton(tr("Load configuration…"), central);
-        saveConfigButton_ = new QPushButton(tr("Save configuration…"), central);
-        saveConfigButton_->setToolTip(tr(
-            "Stop audio to capture the latest VST3 plugin state before saving a portable configuration."));
-        configActions->addWidget(loadConfigButton_);
-        configActions->addWidget(saveConfigButton_);
-        root->addLayout(configActions);
-        connect(loadConfigButton_, &QPushButton::clicked, this, [this] { loadConfiguration(); });
-        connect(saveConfigButton_, &QPushButton::clicked, this, [this] { saveConfiguration(); });
+        // The fast path is a profile selector. Advanced actions live under
+        // one menu, rather than occupying permanent space in the workspace.
+        auto* profileRow = new QHBoxLayout();
+        profileRow->addWidget(new QLabel(tr("Profile"), central));
+        profileSelector_ = new QComboBox(central);
+        profileSelector_->setObjectName(QStringLiteral("profileSelector"));
+        profileSelector_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        profileSelector_->setMinimumContentsLength(18);
+        profileSelector_->setToolTip(tr(
+            "Switch between saved .vsthost profiles. Stop audio before switching."));
+        profileRow->addWidget(profileSelector_, 1);
+        saveProfileButton_ = new QPushButton(tr("Save profile"), central);
+        saveProfileButton_->setToolTip(tr(
+            "Save the current chain, routing, and last captured plugin state. "
+            "Stop audio first to capture a fresh state snapshot."));
+        profileRow->addWidget(saveProfileButton_);
+        profileMenuButton_ = new QToolButton(central);
+        profileMenuButton_->setText(QStringLiteral("⋮"));
+        profileMenuButton_->setObjectName(QStringLiteral("appMenuButton"));
+        profileMenuButton_->setToolTip(tr("Profiles, preferences, help and about"));
+        profileMenuButton_->setAccessibleName(tr("Application menu"));
+        profileMenuButton_->setPopupMode(QToolButton::InstantPopup);
+        auto* applicationMenu = new QMenu(profileMenuButton_);
+        profileSaveAsAction_ = applicationMenu->addAction(tr("Save profile as…"));
+        profileRenameAction_ = applicationMenu->addAction(tr("Rename profile…"));
+        profileDeleteAction_ = applicationMenu->addAction(tr("Delete profile…"));
+        applicationMenu->addSeparator();
+        profileImportAction_ = applicationMenu->addAction(tr("Import .vsthost as profile…"));
+        profileLoadFileAction_ = applicationMenu->addAction(tr("Open .vsthost file…"));
+        profileExportAction_ = applicationMenu->addAction(tr("Export current .vsthost…"));
+        applicationMenu->addSeparator();
+        applicationMenu->addAction(tr("Preferences…"), this,
+                                   [this] { showPreferences(); });
+        applicationMenu->addAction(tr("Help / Getting started…"), this,
+                                   [this] { showHelp(); });
+        applicationMenu->addAction(tr("About VST Host Experiment…"), this,
+                                   [this] { showAbout(); });
+        profileMenuButton_->setMenu(applicationMenu);
+        profileRow->addWidget(profileMenuButton_);
+        root->addLayout(profileRow);
+        connect(profileSelector_, &QComboBox::activated, this,
+                [this](int index) { switchProfile(index); });
+        connect(saveProfileButton_, &QPushButton::clicked, this,
+                [this] { saveCurrentProfile(); });
+        connect(profileSaveAsAction_, &QAction::triggered, this,
+                [this] { saveProfileAs(); });
+        connect(profileRenameAction_, &QAction::triggered, this,
+                [this] { renameProfile(); });
+        connect(profileDeleteAction_, &QAction::triggered, this,
+                [this] { deleteProfile(); });
+        connect(profileImportAction_, &QAction::triggered, this,
+                [this] { importProfile(); });
+        connect(profileLoadFileAction_, &QAction::triggered, this,
+                [this] { loadConfiguration(); });
+        connect(profileExportAction_, &QAction::triggered, this,
+                [this] { saveConfiguration(); });
 
         // Plugin-directory management is infrequent: collapse it by default
         // so the browser and chain get most of the vertical space.

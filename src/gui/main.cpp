@@ -41,8 +41,10 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#if defined(VST_HOST_HAVE_X11)
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
+#endif
 
 #include <atomic>
 #include <cstdint>
@@ -62,6 +64,9 @@
 
 namespace {
 
+// VST2/VST3 XEmbed editors are available only when Qt itself uses X11/xcb.
+// Wayland can still run the entire Qt host and standard parameter controls.
+#if defined(VST_HOST_HAVE_X11)
 class XEmbedSurface final {
 public:
     explicit XEmbedSurface(Window qtParent, QWidget* focusOwner)
@@ -354,6 +359,7 @@ private:
     bool editorAttached_{false};
     bool noChildWarningPrinted_{false};
 };
+#endif
 
 class PluginEditorDialog final : public QDialog {
 public:
@@ -390,15 +396,35 @@ public:
         auto* nativeLayout = new QVBoxLayout(nativePage);
         nativeLayout->setContentsMargins(0, 0, 0, 0);
         surface_ = new QWidget(nativePage);
-        surface_->setAttribute(Qt::WA_NativeWindow);
+#if defined(VST_HOST_HAVE_X11)
+        // Never create a native X11 socket from a Wayland QPA window ID.
+        if (QGuiApplication::platformName() == QStringLiteral("xcb")) {
+            surface_->setAttribute(Qt::WA_NativeWindow);
+            surface_->installEventFilter(this);
+        }
+#endif
         surface_->setFocusPolicy(Qt::StrongFocus);
-        surface_->installEventFilter(this);
         surface_->setMinimumSize(320, 180);
         nativeLayout->addWidget(surface_);
         tabs_->addTab(nativePage, tr("Plugin UI"));
         parameterScroll_ = new QScrollArea(tabs_);
         parameterScroll_->setWidgetResizable(true);
         tabs_->addTab(parameterScroll_, tr("Parameters (host controls)"));
+        // Wayland-native Qt windows cannot contain an XEmbed child. Keep the
+        // plugin fully usable through host parameters without forcing xcb.
+#if defined(VST_HOST_HAVE_X11)
+        const bool hasX11Embedding =
+            QGuiApplication::platformName() == QStringLiteral("xcb");
+#else
+        constexpr bool hasX11Embedding = false;
+#endif
+        if (!hasX11Embedding) {
+            tabs_->setTabEnabled(0, false);
+            tabs_->setTabToolTip(0, tr("This editor uses X11/XEmbed. "
+                "Host controls work on Wayland; launch with QT_QPA_PLATFORM=xcb "
+                "to use compatible plugin-specific interfaces."));
+            tabs_->setCurrentIndex(1);
+        }
         // Synchronize host controls with edits made in the native plugin UI
         // whenever the user returns to this tab. No polling or cross-thread
         // VST3 calls are necessary while the window stays on Plugin UI.
@@ -424,7 +450,9 @@ public:
         if (parameterScroll_) delete parameterScroll_->takeWidget();
         if (processor_ != nullptr && attached_) processor_->close_editor();
         attached_ = false;
+#if defined(VST_HOST_HAVE_X11)
         xembed_.reset();
+#endif
     }
 
     void rebuildParameterPanel() {
@@ -511,22 +539,28 @@ public:
 
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override {
+#if defined(VST_HOST_HAVE_X11)
         if (watched == surface_ && xembed_ &&
             event->type() == QEvent::MouseButtonPress)
             xembed_->focusPlugin();
+#endif
         return QDialog::eventFilter(watched, event);
     }
 
     void changeEvent(QEvent* event) override {
         QDialog::changeEvent(event);
+#if defined(VST_HOST_HAVE_X11)
         if (xembed_ && event->type() == QEvent::ActivationChange)
             xembed_->setActive(isActiveWindow());
+#endif
     }
 
     void resizeEvent(QResizeEvent* event) override {
         QDialog::resizeEvent(event);
+#if defined(VST_HOST_HAVE_X11)
         if (xembed_ && attached_)
             xembed_->resizeTo(surface_->width(), surface_->height());
+#endif
     }
 
 public:
@@ -537,40 +571,51 @@ public:
             return false;
         }
         show();
-        surface_->show();
-        if (!attached_ && !windowInitialized_) {
-            QApplication::processEvents();
-            windowInitialized_ = true;
-        }
+#if defined(VST_HOST_HAVE_X11)
+        if (QGuiApplication::platformName() == QStringLiteral("xcb") &&
+            processor_->has_native_editor()) {
+            surface_->show();
+            if (!attached_ && !windowInitialized_) {
+                QApplication::processEvents();
+                windowInitialized_ = true;
+            }
 
-        int width = 0;
-        int height = 0;
-        std::string detail;
-        const auto nativeId = static_cast<Window>(surface_->winId());
-        xembed_ = std::make_unique<XEmbedSurface>(nativeId, surface_);
-        if (!xembed_->valid()) {
-            error = QString::fromStdString(xembed_->error());
-            return false;
+            int width = 0;
+            int height = 0;
+            std::string detail;
+            const auto nativeId = static_cast<Window>(surface_->winId());
+            xembed_ = std::make_unique<XEmbedSurface>(nativeId, surface_);
+            if (!xembed_->valid()) {
+                error = QString::fromStdString(xembed_->error());
+                return false;
+            }
+            auto* nativeParent = reinterpret_cast<void*>(
+                static_cast<std::uintptr_t>(xembed_->window()));
+            if (!processor_->open_editor(nativeParent, width, height, detail)) {
+                error = QString::fromStdString(detail);
+                return false;
+            }
+            attached_ = true;
+            xembed_->editorAttached();
+            surface_->setMinimumSize(width, height);
+            surface_->resize(width, height);
+            xembed_->resizeTo(width, height);
+            resize(width + 24, height + 48);
+            surface_->setFocus(Qt::OtherFocusReason);
+            xembed_->setActive(isActiveWindow());
+            xembed_->focusPlugin();
+            rebuildParameterPanel();
+            tabs_->setTabEnabled(0, true);
+            tabs_->setCurrentIndex(0);
+            return true;
         }
-        auto* nativeParent = reinterpret_cast<void*>(static_cast<std::uintptr_t>(xembed_->window()));
-        if (!processor_->open_editor(nativeParent, width, height, detail)) {
-            error = QString::fromStdString(detail);
-            return false;
-        }
-        attached_ = true;
-        xembed_->editorAttached();
-        surface_->setMinimumSize(width, height);
-        surface_->resize(width, height);
-        xembed_->resizeTo(width, height);
-        resize(width + 24, height + 48);
-        surface_->setFocus(Qt::OtherFocusReason);
-        xembed_->setActive(isActiveWindow());
-        xembed_->focusPlugin();
+#endif
+        // Native Wayland (or a build without X11) uses standard VST parameter
+        // controls. No Xlib call and no attempt to reinterpret a Wayland
+        // surface handle as an X11 Window ID is made here.
+        tabs_->setTabEnabled(0, false);
+        tabs_->setCurrentIndex(1);
         rebuildParameterPanel();
-        // A number of VST2 effects have no native editor. Host Controls
-        // remain fully usable without presenting an empty plugin canvas.
-        tabs_->setTabEnabled(0, processor_->has_native_editor());
-        tabs_->setCurrentIndex(processor_->has_native_editor() ? 0 : 1);
         return true;
     }
 
@@ -582,7 +627,9 @@ private:
     QWidget* surface_{};
     QTabWidget* tabs_{};
     QScrollArea* parameterScroll_{};
+#if defined(VST_HOST_HAVE_X11)
     std::unique_ptr<XEmbedSurface> xembed_;
+#endif
     bool attached_{false};
 };
 
@@ -807,8 +854,8 @@ public:
         diagnostics_ = new QLabel(tr("Audio diagnostics: not running"), central);
         root->addWidget(diagnostics_);
         auto* note = new QLabel(
-            tr("Plugin editor embedding currently requires the Qt X11 (xcb) platform. "
-               "Wayland-native editor embedding is not implemented yet."), central);
+            tr("Plugin-specific editors use X11/XWayland. On native Wayland, "
+               "the host's standard parameter controls remain available."), central);
         note->setWordWrap(true);
         root->addWidget(note);
         auto* scrollArea = new QScrollArea(this);
@@ -1427,14 +1474,6 @@ private:
                     chainList_->item(selectedIndex)->data(Qt::UserRole + 1).toBool())));
             editorDialog_->raise();
             editorDialog_->activateWindow();
-            return;
-        }
-        if (QGuiApplication::platformName() != QStringLiteral("xcb")) {
-            QMessageBox::information(
-                this, tr("X11 editor embedding required"),
-                tr("The current Qt platform is '%1'. Start this application with "
-                   "QT_QPA_PLATFORM=xcb in an X11/XWayland session to embed this plugin editor.")
-                    .arg(QGuiApplication::platformName()));
             return;
         }
         if (!engine_ || engine_->plugin_processor() == nullptr) return;

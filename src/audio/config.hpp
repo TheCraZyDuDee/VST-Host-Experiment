@@ -58,6 +58,22 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
                 return false;
             }
             parsed.bypass = value == "true";
+        } else if (key == "plugin_bypassed") {
+            // Optional setting for the immediately preceding plugin entry.
+            // Old config files lack this key and continue to load as active.
+            std::string value;
+            if (parsed.plugin_bypassed.empty() ||
+                !(value_stream >> value) || (value != "true" && value != "false")) {
+                error = "Invalid plugin_bypassed at line " + std::to_string(line_number);
+                return false;
+            }
+            value_stream >> std::ws;
+            if (!value_stream.eof()) {
+                error = "Unexpected plugin_bypassed data at line " +
+                        std::to_string(line_number);
+                return false;
+            }
+            parsed.plugin_bypassed.back() = value == "true";
         } else if (key == "input" || key == "output_name" || key == "plugin" || key == "plugin_directory" || key == "windows_plugin_directory") {
             std::string value;
             if (!(value_stream >> std::quoted(value)) || (value.empty() && key != "input")) {
@@ -73,8 +89,10 @@ inline bool load_config(const std::filesystem::path& path, PipeWireOptions& opti
             else if (key == "output_name") {
                 parsed.output_name = value;
                 parsed.output_description = value;
-            } else if (key == "plugin") parsed.plugin_paths.push_back(value);
-            else if (key == "plugin_directory") parsed.plugin_directories.push_back(value);
+            } else if (key == "plugin") {
+                parsed.plugin_paths.push_back(value);
+                parsed.plugin_bypassed.push_back(false);
+            } else if (key == "plugin_directory") parsed.plugin_directories.push_back(value);
             else parsed.windows_plugin_directories.push_back(value);
         } else {
             error = "Unknown configuration key '" + key + "' at line " +
@@ -105,8 +123,11 @@ inline bool save_config(const std::filesystem::path& path, const PipeWireOptions
                << std::setprecision(9) << "gain = " << options.gain << '\n'
                << "latency_frames = " << options.latency_frames << '\n'
                << "bypass = " << (options.bypass ? "true" : "false") << '\n';
-        for (const auto& plugin : options.plugin_paths)
-            output << "plugin = " << std::quoted(plugin) << '\n';
+        for (std::size_t index = 0; index < options.plugin_paths.size(); ++index) {
+            output << "plugin = " << std::quoted(options.plugin_paths[index]) << '\n';
+            if (index < options.plugin_bypassed.size() && options.plugin_bypassed[index])
+                output << "plugin_bypassed = true\n";
+        }
         for (const auto& directory : options.plugin_directories)
             output << "plugin_directory = " << std::quoted(directory) << '\n';
         for (const auto& directory : options.windows_plugin_directories)

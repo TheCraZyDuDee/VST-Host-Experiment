@@ -4,8 +4,8 @@
 - [x] Establish goals and architectural constraints.
 - [x] Add a minimal CMake/C++20 scaffold.
 - [x] Add the first PipeWire capture/source implementation.
-- [ ] Compile on a Linux system with PipeWire development packages and fix API/compiler issues.
-- [ ] Add unit tests for the SPSC buffer and a CI build.
+- [x] Compile and test on Linux in GitHub Actions with PipeWire development packages (real-device testing remains a separate task).
+- [x] Add unit tests for the SPSC buffer and a CI build.
 
 ## Phase 1 — Audio routing proof of concept
 - [x] Add a capture stream and named virtual-source node.
@@ -17,7 +17,8 @@
 
 ## Phase 2 — Processing graph
 - [x] Define a real-time-safe processor interface and route the gain stage through it.
-- [ ] Support runtime gain/bypass changes using bounded real-time-safe control transfer.
+- [x] Support per-effect runtime bypass with atomic control flags and a regression test.
+- [ ] Support runtime output gain/bypass changes without restarting the engine.
 - [x] Add ordered processor chains, mono/stereo adaptation between VST3 stages, and cumulative plugin-latency reporting.
 - [x] Persist plugin chain order and host audio routing/gain/latency settings in the Qt UI.
 - [x] Add portable configuration import/export shared by GUI and CLI; run saved configurations headlessly.
@@ -36,11 +37,12 @@
 - [x] Add an optional Qt 6 UI with VST3 editor hosting; headless build remains independent.
 - [x] Plugin chain editor, gain bypass, and engine status.
 - [x] PipeWire device enumeration/selection in the Qt frontend.
-- [ ] Plugin bypass and input/output meters.
+- [x] Add selectable per-plugin bypass that can be changed while audio runs.
+- [ ] Add input/output meters and clipping indication.
 - [ ] Ensure the app remains usable headlessly.
 
 ## Phase 5 — Later research
 - [x] Add configurable plugin-directory scanning and discovery.
-- [x] Integrate optional Wine/yabridge setup and Windows VST3 wrapper loading; see [Windows VST3 bridge documentation](windows-vst3-bridge.md).
+- [x] Integrate optional Wine/vstbridge setup, yabridge fallback, and Windows VST3 wrapper loading; see [Windows VST3 bridge documentation](windows-vst3-bridge.md).
 - [ ] Add bridge lifecycle monitoring and failure isolation.
 - [ ] Document unsupported plugins and failure behavior.

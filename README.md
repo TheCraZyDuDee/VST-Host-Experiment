@@ -82,6 +82,33 @@ Each plugin instance currently supports its first main audio input/output bus wi
 
 The output source is intended to appear in applications' microphone/input-device lists as **VST Host Virtual Microphone** (or the name supplied with `--name`). This needs verification on the target distribution and PipeWire version; if the node is exposed as an application stream instead of a selectable source, the virtual-source publication strategy will need adjustment.
 
+## Live per-effect bypass
+
+Select an effect in the **Processing chain** and check **Bypass selected
+effect (can change while audio runs)** to temporarily skip that effect.
+The effect remains loaded and prepared, so it can be re-enabled immediately
+without restarting the microphone or changing the processing order.
+Bypassed effects are marked `[BYPASSED]` in the chain. The bypass toggle
+uses an atomic flag read by the audio callback: no reallocation, file I/O,
+or blocking synchronization occurs in the real-time processing path.
+
+The selected bypass states are saved in the desktop settings and portable
+`.vsthost` files. They follow individual plugin instances if you reorder
+the chain; different instances of the same VST3 can be bypassed independently.
+Configuration files add an optional `plugin_bypassed = true` line after the
+corresponding `plugin = "..."` line. Older files without this key work
+unchanged, with every effect enabled by default. The CLI can start a
+disabled instance explicitly:
+
+```sh
+./build-vst3/vst-host --plugin /path/to/Effect.vst3 --plugin-bypassed /path/to/Another.vst3
+```
+
+Bypassing a latency-producing effect may cause an audible timing change.
+It does **not** reset the plugin's internal state or compensate for latency,
+and the host does not currently support changing the chain order or plugin
+loading while audio is running.
+
 ## Windows VST3 bridging (vstbridge preferred)
 
 Install Wine and [vstbridge](https://github.com/rations/vstbridge) separately.

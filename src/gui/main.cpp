@@ -32,6 +32,7 @@
 #include <QTabWidget>
 #include <QFrame>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSet>
 #include <QPointer>
 #include <QTimer>
@@ -633,6 +634,21 @@ public:
         selectedPluginLabel_ = new QLabel(tr("No effect selected"), central);
         selectedPluginLabel_->setWordWrap(true);
         root->addWidget(selectedPluginLabel_);
+        bypassSelectedEffect_ = new QCheckBox(
+            tr("Bypass selected effect (can change while audio runs)"), central);
+        bypassSelectedEffect_->setEnabled(false);
+        root->addWidget(bypassSelectedEffect_);
+        connect(bypassSelectedEffect_, &QCheckBox::toggled, this,
+                [this](bool bypassed) {
+                    const int row = chainList_->currentRow();
+                    if (row < 0) return;
+                    chainList_->item(row)->setData(Qt::UserRole + 2, bypassed);
+                    updateChainLabels();
+                    if (engine_)
+                        (void)engine_->set_plugin_bypassed(
+                            static_cast<std::size_t>(row), bypassed);
+                    saveSettings();
+                });
         auto* chainActions = new QHBoxLayout();
         removePluginButton_ = new QPushButton(tr("Remove selected"), central);
         moveUpButton_ = new QPushButton(tr("Move up"), central);
@@ -841,9 +857,12 @@ private:
     void updateChainLabels() {
         for (int i = 0; i < chainList_->count(); ++i) {
             auto* item = chainList_->item(i);
-            item->setText(tr("%1. %2").arg(i + 1)
+            QString text = tr("%1. %2").arg(i + 1)
                 .arg(displayPluginName(item->data(Qt::UserRole).toString(),
-                                        item->data(Qt::UserRole + 1).toBool())));
+                                        item->data(Qt::UserRole + 1).toBool()));
+            if (item->data(Qt::UserRole + 2).toBool())
+                text += tr(" [BYPASSED]");
+            item->setText(text);
         }
     }
 
@@ -865,10 +884,11 @@ private:
         item->setToolTip(path);
     }
 
-    void addChainPlugin(const QString& path, bool wine) {
+    void addChainPlugin(const QString& path, bool wine, bool bypassed = false) {
         auto* item = new QListWidgetItem(displayPluginName(path, wine), chainList_);
         item->setData(Qt::UserRole, path);
         item->setData(Qt::UserRole + 1, wine);
+        item->setData(Qt::UserRole + 2, bypassed);
         item->setToolTip(path);
         updateChainLabels();
     }
@@ -900,9 +920,11 @@ private:
         settings.beginGroup(QStringLiteral("audio"));
         const auto paths = settings.value(QStringLiteral("pluginChain")).toStringList();
         const auto kinds = settings.value(QStringLiteral("pluginChainWine")).toList();
+        const auto bypasses = settings.value(QStringLiteral("pluginChainBypassed")).toList();
         for (int i = 0; i < paths.size(); ++i) {
             addChainPlugin(paths[i], i < kinds.size()
-                ? kinds[i].toBool() : appearsToBeWineWrapper(paths[i]));
+                ? kinds[i].toBool() : appearsToBeWineWrapper(paths[i]),
+                i < bypasses.size() && bypasses[i].toBool());
         }
         manualPlugins_ = settings.value(QStringLiteral("individualPluginBundles")).toStringList();
         const auto directories = settings.value(QStringLiteral("pluginDirectories")).toStringList();
@@ -927,13 +949,16 @@ private:
         settings.beginGroup(QStringLiteral("audio"));
         QStringList paths;
         QVariantList kinds;
+        QVariantList bypasses;
         for (int i = 0; i < chainList_->count(); ++i) {
             const auto* item = chainList_->item(i);
             paths.push_back(item->data(Qt::UserRole).toString());
             kinds.push_back(item->data(Qt::UserRole + 1).toBool());
+            bypasses.push_back(item->data(Qt::UserRole + 2).toBool());
         }
         settings.setValue(QStringLiteral("pluginChain"), paths);
         settings.setValue(QStringLiteral("pluginChainWine"), kinds);
+        settings.setValue(QStringLiteral("pluginChainBypassed"), bypasses);
         settings.setValue(QStringLiteral("individualPluginBundles"), manualPlugins_);
         QStringList directories;
         QStringList windowsDirectories;
@@ -955,9 +980,11 @@ private:
 
     vst_host::audio::PipeWireOptions optionsFromUi() const {
         vst_host::audio::PipeWireOptions options;
-        for (int i = 0; i < chainList_->count(); ++i)
-            options.plugin_paths.push_back(
-                chainList_->item(i)->data(Qt::UserRole).toString().toStdString());
+        for (int i = 0; i < chainList_->count(); ++i) {
+            const auto* item = chainList_->item(i);
+            options.plugin_paths.push_back(item->data(Qt::UserRole).toString().toStdString());
+            options.plugin_bypassed.push_back(item->data(Qt::UserRole + 2).toBool());
+        }
         for (int i = 0; i < pluginDirectories_->count(); ++i) {
             const auto* item = pluginDirectories_->item(i);
             auto& directories = item->data(Qt::UserRole + 1).toBool()
@@ -975,9 +1002,10 @@ private:
 
     void applyOptions(const vst_host::audio::PipeWireOptions& options) {
         chainList_->clear();
-        for (const auto& path : options.plugin_paths) {
-            const auto qpath = QString::fromStdString(path);
-            addChainPlugin(qpath, appearsToBeWineWrapper(qpath));
+        for (std::size_t index = 0; index < options.plugin_paths.size(); ++index) {
+            const auto qpath = QString::fromStdString(options.plugin_paths[index]);
+            addChainPlugin(qpath, appearsToBeWineWrapper(qpath),
+                index < options.plugin_bypassed.size() && options.plugin_bypassed[index]);
         }
         pluginDirectories_->clear();
         for (const auto& directory : options.plugin_directories)
@@ -1182,6 +1210,12 @@ private:
                 .arg(QFileInfo(item->data(Qt::UserRole).toString()).completeBaseName() +
                      (item->data(Qt::UserRole + 1).toBool() ? tr(" (WINE)") : QString()))
             : tr("No effect selected"));
+        {
+            QSignalBlocker blocker(bypassSelectedEffect_);
+            bypassSelectedEffect_->setEnabled(item != nullptr);
+            bypassSelectedEffect_->setChecked(
+                item && item->data(Qt::UserRole + 2).toBool());
+        }
         const bool ready = engine_ && engine_->plugin_processor() != nullptr &&
             chainList_->currentRow() >= 0 &&
             static_cast<std::size_t>(chainList_->currentRow()) < engine_->plugin_count();
@@ -1402,12 +1436,18 @@ private:
                 .arg(static_cast<qulonglong>(newOverflow))
                 .arg(static_cast<qulonglong>(stats.stale_frames))
                 .arg(static_cast<qulonglong>(newStale)));
-        if (engine_->plugin_processor() != nullptr) {
-            updateSelectedPlugin();
-            if (!engineReadyShown_) {
-                status_->setText(tr("Audio is running. Select or double-click a chain effect to edit it."));
-                engineReadyShown_ = true;
-            }
+        if (engine_->plugin_processor() != nullptr) updateSelectedPlugin();
+        if (engine_->is_running() && !engineReadyShown_) {
+            // Apply any bypass changes made during asynchronous startup
+            // before the plug-in list was published to the UI.
+            for (int index = 0; index < chainList_->count(); ++index)
+                (void)engine_->set_plugin_bypassed(
+                    static_cast<std::size_t>(index),
+                    chainList_->item(index)->data(Qt::UserRole + 2).toBool());
+            status_->setText(chainList_->count() > 0
+                ? tr("Audio is running. Select a chain effect to edit or bypass it live.")
+                : tr("Audio is running without effects (direct microphone routing)."));
+            engineReadyShown_ = true;
         }
     }
 
@@ -1441,6 +1481,7 @@ private:
     QPushButton* stopButton_{};
     QPushButton* editorButton_{};
     QLabel* selectedPluginLabel_{};
+    QCheckBox* bypassSelectedEffect_{};
     QLabel* status_{};
     QLabel* diagnostics_{};
     QTimer* pollTimer_{};

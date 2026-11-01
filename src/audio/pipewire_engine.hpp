@@ -24,6 +24,9 @@ struct PipeWireOptions {
     std::string output_description{"VST Host Virtual Microphone"};
     // Ordered VST3 effects. Legacy single-plugin fields remain supported.
     std::vector<std::string> plugin_paths;
+    // Per-instance bypass (false by default); aligned with plugin_paths.
+    // Once loaded, bypass may be changed atomically without restarting audio.
+    std::vector<bool> plugin_bypassed;
     // Search roots for native Linux VST3 bundle directories.
     std::vector<std::string> plugin_directories;
     // Windows VST3 directories managed by optional Wine/yabridge integration.
@@ -46,8 +49,11 @@ public:
     // Blocks until SIGINT/SIGTERM or an internal setup failure.
     int run();
     void request_stop() noexcept;
+    [[nodiscard]] bool is_running() const noexcept;
     [[nodiscard]] Vst3Processor* plugin_processor() const noexcept;
     [[nodiscard]] Vst3Processor* plugin_processor(std::size_t index) const noexcept;
+    // Safe to call from the UI while PipeWire audio processing is active.
+    bool set_plugin_bypassed(std::size_t index, bool bypassed) noexcept;
     [[nodiscard]] std::size_t plugin_count() const noexcept;
     [[nodiscard]] std::string plugin_path(std::size_t index) const;
     [[nodiscard]] std::string last_error() const;

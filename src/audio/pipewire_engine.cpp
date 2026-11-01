@@ -522,7 +522,7 @@ int PipeWireEngine::run() {
     if (!impl_->options.windows_plugin_directories.empty()) {
         for (auto& path : plugin_paths)
             path = plugin_format(path) == PluginFormat::Vst2
-                ? detail::migrate_vst2_wrapper_path(path, selected_bridge)
+                ? migrate_vst2_wrapper_path(path, selected_bridge)
                 : detail::migrate_vst3_wrapper_path(path, selected_bridge);
     }
     auto preloaded_plugins = impl_->options.preloaded_plugins;
@@ -531,7 +531,7 @@ int PipeWireEngine::run() {
             impl_->options.windows_plugin_directories.empty()
                 ? impl_->options.plugin_path
                 : (plugin_format(impl_->options.plugin_path) == PluginFormat::Vst2
-                    ? detail::migrate_vst2_wrapper_path(
+                    ? migrate_vst2_wrapper_path(
                         impl_->options.plugin_path, selected_bridge)
                     : detail::migrate_vst3_wrapper_path(
                         impl_->options.plugin_path, selected_bridge)));

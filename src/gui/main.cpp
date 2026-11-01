@@ -636,6 +636,7 @@ public:
             return false;
         }
         show();
+        editorNotice_->clear();
         editorNotice_->hide();
 #if defined(VST_HOST_HAVE_X11)
         if (QGuiApplication::platformName() == QStringLiteral("xcb") &&

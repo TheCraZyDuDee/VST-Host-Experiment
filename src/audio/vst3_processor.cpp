@@ -238,6 +238,119 @@ bool Vst3Processor::load(std::string& error) {
 }
 
 
+bool Vst3Processor::restore_plugin_state(const PluginState& state, std::string& error) {
+#if !defined(VST_HOST_ENABLE_VST3)
+    (void)state;
+    error = "VST3 hosting is disabled; cannot restore plugin state.";
+    return false;
+#else
+    if (!impl_ || !impl_->loaded || !impl_->component || !impl_->provider) {
+        error = "Cannot restore state before loading the VST3 component.";
+        return false;
+    }
+    if (state.component.size() > max_plugin_state_bytes ||
+        state.controller.size() > max_plugin_state_bytes) {
+        error = "Saved VST3 state exceeds the 16 MiB per-part limit.";
+        return false;
+    }
+    if (state.empty()) return true;
+
+    auto controller = impl_->editor_controller;
+    if (!controller)
+        controller = Steinberg::owned(impl_->provider->getController());
+
+    // Steinberg's required order is: component->setState, controller->
+    // setComponentState, controller->setState. Each call consumes its stream.
+    if (!state.component.empty()) {
+        Steinberg::MemoryStream component_stream(
+            const_cast<std::uint8_t*>(state.component.data()),
+            static_cast<Steinberg::TSize>(state.component.size()));
+        const auto result = impl_->component->setState(&component_stream);
+        if (result != Steinberg::kResultOk) {
+            error = "The plugin rejected its saved DSP/component state.";
+            return false;
+        }
+        if (controller) {
+            component_stream.seek(0, Steinberg::IBStream::kIBSeekSet, nullptr);
+            (void)controller->setComponentState(&component_stream);
+        }
+    }
+    if (controller && !state.controller.empty()) {
+        Steinberg::MemoryStream controller_stream(
+            const_cast<std::uint8_t*>(state.controller.data()),
+            static_cast<Steinberg::TSize>(state.controller.size()));
+        if (controller->setState(&controller_stream) != Steinberg::kResultOk) {
+            error = "The plugin rejected its saved editor/controller state.";
+            return false;
+        }
+    }
+    return true;
+#endif
+}
+
+bool Vst3Processor::snapshot_plugin_state(PluginState& state, std::string& error) {
+#if !defined(VST_HOST_ENABLE_VST3)
+    (void)state;
+    error = "VST3 hosting is disabled; cannot save plugin state.";
+    return false;
+#else
+    if (!impl_ || !impl_->loaded || !impl_->component || !impl_->provider) {
+        error = "Cannot save state from an unloaded VST3 component.";
+        return false;
+    }
+    // Called only after the PipeWire streams have been disconnected; no
+    // processor callbacks can overlap this allocation-intensive operation.
+    Steinberg::MemoryStream component_stream;
+    if (impl_->component->getState(&component_stream) != Steinberg::kResultOk) {
+        error = "The plugin did not provide a readable DSP/component state.";
+        return false;
+    }
+    const auto component_size = static_cast<std::size_t>(component_stream.getSize());
+    if (component_size > max_plugin_state_bytes) {
+        error = "Plugin DSP/component state exceeds the 16 MiB limit.";
+        return false;
+    }
+
+    PluginState snapshot;
+    if (component_size != 0) {
+        if (!component_stream.getData()) {
+            error = "The plugin returned a null DSP state buffer.";
+            return false;
+        }
+        const auto* bytes = reinterpret_cast<const std::uint8_t*>(component_stream.getData());
+        snapshot.component.assign(bytes, bytes + component_size);
+    }
+    auto controller = impl_->editor_controller;
+    if (!controller)
+        controller = Steinberg::owned(impl_->provider->getController());
+
+    if (controller) {
+        Steinberg::MemoryStream controller_stream;
+        // Some VST3 controllers only maintain state in the component or
+        // return kNotImplemented. Preserve the DSP state independently.
+        if (controller->getState(&controller_stream) == Steinberg::kResultOk) {
+            const auto controller_size =
+                static_cast<std::size_t>(controller_stream.getSize());
+            if (controller_size > max_plugin_state_bytes) {
+                error = "Plugin editor/controller state exceeds the 16 MiB limit.";
+                return false;
+            }
+            if (controller_size != 0) {
+                if (!controller_stream.getData()) {
+                    error = "The plugin returned a null controller state buffer.";
+                    return false;
+                }
+                const auto* bytes = reinterpret_cast<const std::uint8_t*>(
+                    controller_stream.getData());
+                snapshot.controller.assign(bytes, bytes + controller_size);
+            }
+        }
+    }
+    state = std::move(snapshot);
+    return true;
+#endif
+}
+
 bool Vst3Processor::open_editor(void* native_parent, int& width, int& height,
                                 std::string& error) {
 #if !defined(VST_HOST_ENABLE_VST3)

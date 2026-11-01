@@ -18,6 +18,8 @@ struct AudioDiagnostics {
     std::uint64_t dropped_frames{};
     std::uint64_t stale_frames{};
     std::uint64_t underrun_frames{};
+    std::uint64_t sanitized_input_samples{};
+    std::uint64_t sanitized_output_samples{};
 };
 
 struct AudioLevelReadings {

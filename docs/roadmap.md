@@ -7,7 +7,7 @@ This page tracks remaining engineering work, not a historical development diary.
 - PipeWire input → ordered VST effect chain → named virtual microphone, with an SDK-free headless mode.
 - Qt 6 plugin browser, search, device selection, drag-to-reorder chain, native editors, Host Controls, live per-effect bypass, stereo input/output peak and RMS meters, clipping indicators, and audio buffer diagnostics.
 - Native Linux VST3 and optional licensed VST2; Wine VST2/VST3 through vstbridge or yabridge; format labels and Windows directory filtering.
-- Pinned microphone reconnection without falling back to another input.
+- Pinned microphone reconnection without falling back to another input, and nonfinite sample sanitization with separate input/output repair diagnostics.
 - Per-instance plugin-state persistence, GUI settings, portable `.vsthost` files, and automated tests.
 
 ## Priorities

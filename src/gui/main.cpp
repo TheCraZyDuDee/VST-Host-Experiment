@@ -417,8 +417,16 @@ public:
                "is visible. May help Wine editors that only update after tab switching. "
                "Can increase CPU usage or cause flicker. Disable if ineffective."));
         redrawRow->addWidget(forceRedraw_);
+        auto* repaintOnce = new QPushButton(tr("Refresh now"), this);
+        repaintOnce->setToolTip(
+            tr("Request one X11 Expose repaint. If this does not update the "
+               "plugin graphics, periodic refreshing is unlikely to help."));
+        redrawRow->addWidget(repaintOnce);
         redrawRow->addStretch();
         layout->addLayout(redrawRow);
+        connect(repaintOnce, &QPushButton::clicked, this, [this] {
+            if (attached_ && xembed_) xembed_->requestRepaint();
+        });
         redrawTimer_ = new QTimer(this);
         redrawTimer_->setInterval(50);
         connect(redrawTimer_, &QTimer::timeout, this, [this] {

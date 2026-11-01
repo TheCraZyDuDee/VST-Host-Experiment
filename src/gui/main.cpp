@@ -456,6 +456,24 @@ public:
         surface_->setFocusPolicy(Qt::StrongFocus);
         surface_->setMinimumSize(320, 180);
         nativeLayout->addWidget(surface_);
+        // When Qt runs on Wayland, a plug-in's X11 editor cannot be
+        // embedded in a Qt widget. Keep this page accessible and provide an
+        // explicit control for the companion XWayland window instead.
+        nativeEditorHint_ = new QLabel(
+            tr("On Wayland, custom plugin interfaces open in a separate "
+               "XWayland window. This page can bring that window forward; "
+               "standard controls are available under Parameters."), nativePage);
+        nativeEditorHint_->setWordWrap(true);
+        nativeLayout->addWidget(nativeEditorHint_);
+        showNativeEditorButton_ = new QPushButton(
+            tr("Show plugin window (XWayland)"), nativePage);
+        showNativeEditorButton_->setEnabled(false);
+        showNativeEditorButton_->setToolTip(tr(
+            "Available when a plug-in has opened a compatible XEmbed editor."));
+        nativeLayout->addWidget(showNativeEditorButton_);
+        nativeLayout->addStretch();
+        connect(showNativeEditorButton_, &QPushButton::clicked, this,
+                [this] { raisePluginEditor(); });
         tabs_->addTab(nativePage, tr("Plugin UI"));
         parameterScroll_ = new QScrollArea(tabs_);
         parameterScroll_->setWidgetResizable(true);
@@ -469,17 +487,22 @@ public:
         constexpr bool hasX11Embedding = false;
 #endif
         if (!hasX11Embedding) {
-            tabs_->setTabEnabled(0, false);
-            tabs_->setTabToolTip(0, tr("Custom XEmbed interfaces open in a "
-                "separate XWayland window when an X11 display is available. "
-                "Standard host controls remain in this Wayland dialog."));
-            tabs_->setCurrentIndex(1);
+            surface_->hide();
+            tabs_->setTabToolTip(0, tr(
+                "Show or reopen a compatible plug-in editor in a separate "
+                "XWayland window. It cannot be embedded in native Qt Wayland."));
+        } else {
+            nativeEditorHint_->hide();
+            showNativeEditorButton_->hide();
         }
         // Synchronize host controls with edits made in the native plugin UI
         // whenever the user returns to this tab. No polling or cross-thread
         // VST3 calls are necessary while the window stays on Plugin UI.
         connect(tabs_, &QTabWidget::currentChanged, this, [this](int index) {
             if (index == 1 && attached_) rebuildParameterPanel();
+            if (index == 0 && showNativeEditorButton_->isVisible() &&
+                showNativeEditorButton_->isEnabled())
+                raisePluginEditor();
         });
         layout->addWidget(tabs_);
         auto* editorIdle = new QTimer(this);
@@ -514,6 +537,7 @@ public:
         if (parameterScroll_) delete parameterScroll_->takeWidget();
         if (processor_ != nullptr && attached_) processor_->close_editor();
         attached_ = false;
+        showNativeEditorButton_->setEnabled(false);
 #if defined(VST_HOST_HAVE_X11)
         xembed_.reset();
 #endif
@@ -636,6 +660,7 @@ public:
             return false;
         }
         show();
+        showNativeEditorButton_->setEnabled(false);
         editorNotice_->clear();
         editorNotice_->hide();
 #if defined(VST_HOST_HAVE_X11)
@@ -699,9 +724,14 @@ public:
                         xembed_->editorAttached();
                         xembed_->resizeTo(std::max(1, width), std::max(1, height));
                         xembed_->raiseWindow();
-                        editorNotice_->setText(tr("Custom plugin editor opened in a "
-                            "separate XWayland window. Closing this dialog also "
-                            "closes the plugin editor."));
+                        showNativeEditorButton_->setEnabled(true);
+                        nativeEditorHint_->setText(tr(
+                            "The custom plugin editor is in a separate "
+                            "XWayland window. Use the button below to bring "
+                            "it forward. Closing this dialog also closes it."));
+                        editorNotice_->setText(tr(
+                            "Plugin UI opened in a separate XWayland window. "
+                            "Use the Plugin UI tab to bring it forward."));
                         editorNotice_->show();
                     } else {
                         editorNotice_->setText(tr("Could not open the XWayland "
@@ -733,8 +763,14 @@ public:
 #endif
         // Native Qt Wayland host controls remain usable even if the
         // external XEmbed window cannot open or the plugin has no custom UI.
-        tabs_->setTabEnabled(0, false);
-        tabs_->setCurrentIndex(1);
+        // On Wayland, the Plugin UI page remains clickable even if the
+        // companion window is unavailable. Never leave an unexplained grey
+        // tab: its text explains where the custom editor should appear.
+        tabs_->setTabEnabled(0, true);
+        tabs_->setCurrentIndex(showNativeEditorButton_->isEnabled() ? 0 : 1);
+        if (!showNativeEditorButton_->isEnabled() &&
+            !editorNotice_->text().isEmpty())
+            nativeEditorHint_->setText(editorNotice_->text());
         rebuildParameterPanel();
         if (!editorNotice_->text().isEmpty()) editorNotice_->show();
         return true;
@@ -744,6 +780,8 @@ private:
     vst_host::audio::PluginProcessor* processor_{};
     QComboBox* selector_{};
     QLabel* editorNotice_{};
+    QLabel* nativeEditorHint_{};
+    QPushButton* showNativeEditorButton_{};
     int activeIndex_{-1};
     bool windowInitialized_{false};
     QWidget* surface_{};

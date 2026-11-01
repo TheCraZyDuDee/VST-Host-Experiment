@@ -1,5 +1,6 @@
 #include "audio/pipewire_engine.hpp"
 #include "audio/config.hpp"
+#include "audio/headless_autoload.hpp"
 
 #include <cerrno>
 #include <cmath>
@@ -16,14 +17,14 @@ void print_usage(const char* executable) {
         << "Usage: " << executable << " [options]\n\n"
         << "Start a lightweight PipeWire virtual microphone with optional VST2/VST3 effects.\n\n"
         << "Options:\n"
-        << "  --config FILE       Load a saved host configuration (headless mode)\n"
+        << "  --config FILE       Run the exact saved plugin chain (no implicit scans)\n"
         << "  --save-config FILE  Save effective options before starting\n"
         << "  --input NODE        Stable PipeWire microphone node name\n"
         << "  --name NODE_NAME    Virtual microphone node name\n"
         << "  --plugin PATH       Add an enabled VST2 .so / VST3 .vst3 effect\n"
         << "  --plugin-bypassed PATH  Add a VST2/VST3 effect initially bypassed\n"
-        << "  --plugin-dir PATH   Scan a native Linux plugin directory; repeat as needed\n"
-        << "  --windows-plugin-dir PATH  Register Windows VST2/VST3 directory (Wine/vstbridge)\n"
+        << "  --plugin-dir PATH   Auto-load plugins from this native directory\n"
+        << "  --windows-plugin-dir PATH  Auto-load Windows plugins using Wine bridge\n"
         << "  --gain VALUE        Linear gain from 0.0 to 4.0\n"
         << "  --latency-frames N  128, 256, 512, or 1024\n"
         << "  --bypass            Bypass the gain processor\n"
@@ -103,13 +104,15 @@ int main(int argc, char** argv) {
                     std::cerr << "Windows plugin directory cannot be empty.\n";
                     return 2;
                 }
-                options.windows_plugin_directories.emplace_back(value);
+                vst_host::audio::add_headless_autoload_directory(
+                    options, value, true);
             } else if (arg == "--plugin-dir") {
                 if (value.empty()) {
                     std::cerr << "Plugin directory cannot be empty.\n";
                     return 2;
                 }
-                options.plugin_directories.emplace_back(value);
+                vst_host::audio::add_headless_autoload_directory(
+                    options, value, false);
             } else if (arg == "--plugin" || arg == "--plugin-bypassed") {
                 if (value.empty()) {
                     std::cerr << "Plugin path cannot be empty.\n";

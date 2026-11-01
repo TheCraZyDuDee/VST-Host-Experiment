@@ -35,10 +35,18 @@ struct PipeWireOptions {
     // Opaque per-instance component/controller state. Snapshots are saved
     // after audio processing has stopped, never from a PipeWire callback.
     std::vector<PluginState> plugin_states;
-    // Search roots for native Linux VST3 bundle directories.
+    // Persisted search roots used by the GUI's available-plugin browser.
+    // These do NOT automatically add effects to the processing chain.
     std::vector<std::string> plugin_directories;
-    // Windows VST3 directories managed by optional Wine/yabridge integration.
+    // Windows folders registered with the external bridge (not auto-loaded).
     std::vector<std::string> windows_plugin_directories;
+
+    // CLI-only, non-persisted auto-load opt-ins. Only --plugin-dir and
+    // --windows-plugin-dir populate these. A --config launch must reproduce
+    // its saved plugin_paths exactly unless the user explicitly supplies
+    // additional directory flags on that command line.
+    std::vector<std::string> auto_load_plugin_directories;
+    std::vector<std::string> auto_load_windows_plugin_directories;
     std::vector<std::shared_ptr<Vst3Processor>> preloaded_plugins; // legacy VST3 preloads
     std::string plugin_path;
     std::shared_ptr<Vst3Processor> preloaded_plugin;

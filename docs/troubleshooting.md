@@ -24,6 +24,14 @@ cmake --build build --target vst2-processor-test --parallel 1 --verbose
 - Try starting without plugins, then add effects one at a time. A bypassed effect remains loaded but does not process audio.
 - If output drops out, increase the latency buffer from 128 to 256/512/1024 frames and watch the GUI's dropped/underrun/stale frame counters. PipeWire controls actual graph latency; the setting is a request, not a guarantee.
 
+## Headless mode sounds different or uses more CPU
+
+A `.vsthost` configuration can contain **both** a selected processing chain and directories for browsing available plugins. Headless `--config FILE` now loads the saved chain **exactly**; it does not load every plugin in those directories or synchronize a global Wine bridge just because the folders are stored in the file.
+
+If you add `--plugin-dir` or `--windows-plugin-dir` to the command, that explicitly **adds discovered plugins to the running chain**. This can substantially increase CPU usage or change the stereo output if one of those effects is configured for mono or other channel behavior. Read the printed `Plugin chain N:` lines to confirm the same plugin order and bypass settings as the GUI. The core GUI and CLI use the same stereo PipeWire engine.
+
+If audio still differs with only `--config FILE`, try the same setup with every effect bypassed to distinguish plugin-specific output routing from PipeWire capture/source routing, and provide the `Plugin chain` startup lines.
+
 ## Plugin fails to load
 
 - Check the format: VST3 uses a `.vst3` bundle; native/bridged VST2 uses a Linux `.so` wrapper. A Windows `.dll` is **not** directly loadable.

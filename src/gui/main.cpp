@@ -7,6 +7,7 @@
 #include "audio/vst3_processor.hpp"
 #include "gui/process_cpu_meter.hpp"
 #include "gui/profile_management.hpp"
+#include "gui/tray_policy.hpp"
 
 #include <QApplication>
 #include <QByteArray>
@@ -40,6 +41,11 @@
 #include <QAbstractItemView>
 #include <QAbstractItemModel>
 #include <QMainWindow>
+#include <QSystemTrayIcon>
+#include <QStyle>
+#include <QIcon>
+#include <QShowEvent>
+#include <QHideEvent>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QProgressBar>
@@ -966,8 +972,12 @@ public:
 
         // The fast path is a profile selector. Advanced actions live under
         // one menu, rather than occupying permanent space in the workspace.
-        auto* profileRow = new QHBoxLayout();
-        profileRow->addWidget(new QLabel(tr("Profile"), central));
+        auto* profileBar = new QWidget(central);
+        profileBar->setObjectName(QStringLiteral("profileToolbar"));
+        auto* profileRow = new QHBoxLayout(profileBar);
+        profileRow->setContentsMargins(2, 0, 2, 0);
+        profileRow->setSpacing(6);
+        profileRow->addWidget(new QLabel(tr("Profile"), profileBar));
         profileSelector_ = new QComboBox(central);
         profileSelector_->setObjectName(QStringLiteral("profileSelector"));
         profileSelector_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -975,13 +985,14 @@ public:
         profileSelector_->setToolTip(tr(
             "Switch between saved .vsthost profiles. Stop audio before switching."));
         profileRow->addWidget(profileSelector_, 1);
-        saveProfileButton_ = new QPushButton(tr("Save profile"), central);
+        saveProfileButton_ = new QPushButton(tr("Save"), profileBar);
         saveProfileButton_->setToolTip(tr(
             "Save the current chain, routing, and last captured plugin state. "
             "Stop audio first to capture a fresh state snapshot."));
         profileRow->addWidget(saveProfileButton_);
-        profileMenuButton_ = new QToolButton(central);
+        profileMenuButton_ = new QToolButton(profileBar);
         profileMenuButton_->setText(QStringLiteral("⋮"));
+        profileMenuButton_->setAutoRaise(true);
         profileMenuButton_->setObjectName(QStringLiteral("appMenuButton"));
         profileMenuButton_->setToolTip(tr("Profiles, preferences, help and about"));
         profileMenuButton_->setAccessibleName(tr("Application menu"));
@@ -1001,9 +1012,16 @@ public:
                                    [this] { showHelp(); });
         applicationMenu->addAction(tr("About VST Host Experiment…"), this,
                                    [this] { showAbout(); });
+        applicationMenu->addSeparator();
+        hideToTrayAction_ = applicationMenu->addAction(tr("Hide to system tray"));
+        hideToTrayAction_->setEnabled(false);
+        connect(hideToTrayAction_, &QAction::triggered, this,
+                [this] { hideWindowToTray(); });
+        applicationMenu->addAction(tr("Quit"), this,
+                                   [this] { quitApplication(); });
         profileMenuButton_->setMenu(applicationMenu);
         profileRow->addWidget(profileMenuButton_);
-        root->insertLayout(0, profileRow);
+        root->insertWidget(0, profileBar);
         connect(profileSelector_, &QComboBox::activated, this,
                 [this](int index) { switchProfile(index); });
         connect(saveProfileButton_, &QPushButton::clicked, this,
@@ -1172,11 +1190,38 @@ public:
             "bridge processes. Effect latency is the sum reported by active "
             "plug-ins; it is not measured end-to-end PipeWire or device delay."));
         root->addWidget(performance_);
-        auto* note = new QLabel(
-            tr("Plugin-specific editors use X11/XWayland. On native Wayland, "
-               "the host's standard parameter controls remain available."), central);
-        note->setWordWrap(true);
-        root->addWidget(note);
+        // Keep the monitoring details available, but make them collapsible:
+        // the plugin library and chain should get most of the screen space.
+        auto* detailsToggle = new QToolButton(central);
+        detailsToggle->setObjectName(QStringLiteral("diagnosticsToggle"));
+        detailsToggle->setText(tr("Diagnostics"));
+        detailsToggle->setCheckable(true);
+        detailsToggle->setChecked(false);
+        detailsToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        detailsToggle->setArrowType(Qt::RightArrow);
+        detailsToggle->setToolTip(tr("Show buffer health and host performance details"));
+        auto* detailsPanel = new QWidget(central);
+        auto* detailsLayout = new QVBoxLayout(detailsPanel);
+        detailsLayout->setContentsMargins(6, 0, 0, 0);
+        detailsLayout->setSpacing(3);
+        // Move existing diagnostic widgets into the collapsible panel.
+        root->removeWidget(diagnostics_);
+        root->removeWidget(performance_);
+        detailsLayout->addWidget(diagnostics_);
+        detailsLayout->addWidget(performance_);
+        detailsPanel->setVisible(false);
+        root->addWidget(detailsToggle);
+        root->addWidget(detailsPanel);
+        diagnosticsToggle_ = detailsToggle;
+        connect(detailsToggle, &QToolButton::toggled, this,
+                [this, detailsPanel](bool visible) {
+                    detailsPanel->setVisible(visible);
+                    diagnosticsToggle_->setArrowType(
+                        visible ? Qt::DownArrow : Qt::RightArrow);
+                    QSettings settings(QStringLiteral("VSTHostExperiment"),
+                                       QStringLiteral("VSTHostExperiment"));
+                    settings.setValue(QStringLiteral("ui/diagnosticsExpanded"), visible);
+                });
         auto* scrollArea = new QScrollArea(this);
         scrollArea->setWidgetResizable(true);
         scrollArea->setFrameShape(QFrame::NoFrame);
@@ -1231,6 +1276,14 @@ public:
         pollTimer_->setInterval(200);
         connect(pollTimer_, &QTimer::timeout, this, [this] { pollEngine(); });
         loadSettings();
+        {
+            QSettings settings(QStringLiteral("VSTHostExperiment"),
+                               QStringLiteral("VSTHostExperiment"));
+            diagnosticsToggle_->setChecked(settings.value(
+                QStringLiteral("ui/diagnosticsExpanded"), false).toBool());
+            configureTrayIcon(settings.value(
+                QStringLiteral("ui/showTrayIcon"), false).toBool());
+        }
         refreshProfileSelector();
         if (startedAtLogin_) {
             QSettings startupSettings(QStringLiteral("VSTHostExperiment"),
@@ -1262,13 +1315,114 @@ public:
         stopAudio();
     }
 
+    [[nodiscard]] bool shouldBeginHiddenAtLogin() const {
+        if (!startedAtLogin_) return false;
+        QSettings settings(QStringLiteral("VSTHostExperiment"),
+                           QStringLiteral("VSTHostExperiment"));
+        return vst_host::gui::should_start_hidden_at_login(
+            true,
+            settings.value(QStringLiteral("autostart/startHidden"), false).toBool(),
+            trayEnabled_, trayAvailable());
+    }
+
 protected:
     void closeEvent(QCloseEvent* event) override {
+        if (vst_host::gui::should_hide_close_to_tray(
+                trayEnabled_, trayAvailable(), quitting_)) {
+            event->ignore();
+            hideWindowToTray();
+            return;
+        }
         stopAudio();
         QMainWindow::closeEvent(event);
     }
 
+    void showEvent(QShowEvent* event) override {
+        QMainWindow::showEvent(event);
+        updateTrayAction();
+    }
+
+    void hideEvent(QHideEvent* event) override {
+        QMainWindow::hideEvent(event);
+        updateTrayAction();
+    }
+
 private:
+    [[nodiscard]] bool trayAvailable() const {
+        return trayEnabled_ && trayIcon_ && trayIcon_->isVisible() &&
+               QSystemTrayIcon::isSystemTrayAvailable();
+    }
+
+    void updateTrayAction() {
+        if (trayShowHideAction_)
+            trayShowHideAction_->setText(isVisible()
+                ? tr("Hide window") : tr("Show window"));
+        if (hideToTrayAction_) hideToTrayAction_->setEnabled(trayAvailable());
+    }
+
+    void showMainWindow() {
+        showNormal();
+        raise();
+        activateWindow();
+        updateTrayAction();
+    }
+
+    void hideWindowToTray() {
+        // A legacy VST editor may have a separate top-level XWayland
+        // window. Detach its UI when hiding, leaving the audio engine running.
+        if (!trayAvailable()) {
+            showMainWindow();
+            return;
+        }
+        closeEditorDialog();
+        hide();
+        updateTrayAction();
+    }
+
+    void quitApplication() {
+        quitting_ = true;
+        close();
+        QApplication::quit();
+    }
+
+    void configureTrayIcon(bool enabled) {
+        trayEnabled_ = enabled;
+        if (enabled && !trayIcon_) {
+            trayIcon_ = new QSystemTrayIcon(this);
+            trayIcon_->setObjectName(QStringLiteral("vstHostTrayIcon"));
+            trayIcon_->setIcon(QIcon::fromTheme(
+                QStringLiteral("audio-input-microphone"),
+                style()->standardIcon(QStyle::SP_ComputerIcon)));
+            trayIcon_->setToolTip(tr("VST Host Experiment"));
+            trayMenu_ = new QMenu(this);
+            trayShowHideAction_ = trayMenu_->addAction(tr("Show window"));
+            trayShowHideAction_->setObjectName(QStringLiteral("trayToggleWindow"));
+            connect(trayShowHideAction_, &QAction::triggered, this, [this] {
+                if (isVisible()) hideWindowToTray();
+                else showMainWindow();
+            });
+            trayMenu_->addSeparator();
+            trayMenu_->addAction(tr("Preferences…"), this, [this] {
+                showMainWindow();
+                showPreferences();
+            });
+            trayMenu_->addAction(tr("Quit"), this, [this] {
+                quitApplication();
+            });
+            trayIcon_->setContextMenu(trayMenu_);
+            connect(trayIcon_, &QSystemTrayIcon::activated, this,
+                    [this](QSystemTrayIcon::ActivationReason reason) {
+                        if (reason != QSystemTrayIcon::Trigger &&
+                            reason != QSystemTrayIcon::DoubleClick) return;
+                        if (isVisible()) hideWindowToTray();
+                        else showMainWindow();
+                    });
+        }
+        if (trayIcon_) trayIcon_->setVisible(enabled);
+        QApplication::setQuitOnLastWindowClosed(!trayAvailable());
+        updateTrayAction();
+    }
+
     static vst_host::audio::PluginState storedPluginState(const QListWidgetItem* item) {
         vst_host::audio::PluginState result;
         if (!item) return result;
@@ -1897,14 +2051,34 @@ private:
                            QStringLiteral("VSTHostExperiment"));
         QDialog dialog(this);
         dialog.setWindowTitle(tr("Preferences"));
-        dialog.resize(470, 250);
+        dialog.resize(500, 380);
         auto* layout = new QVBoxLayout(&dialog);
-        auto* login = new QCheckBox(tr("Launch VST Host when I log in"), &dialog);
-        login->setChecked(settings.value(QStringLiteral("autostart/enabled"), false).toBool());
-        layout->addWidget(login);
+        layout->setSpacing(10);
+
+        auto* appearanceGroup = new QGroupBox(tr("Window and tray"), &dialog);
+        auto* appearanceLayout = new QVBoxLayout(appearanceGroup);
+        auto* useTray = new QCheckBox(tr("Show a system tray icon"), appearanceGroup);
+        useTray->setObjectName(QStringLiteral("showTrayPreference"));
+        useTray->setChecked(settings.value(
+            QStringLiteral("ui/showTrayIcon"), false).toBool());
+        appearanceLayout->addWidget(useTray);
+        auto* trayHint = new QLabel(tr(
+            "When enabled, closing the window hides it without stopping audio. "
+            "Use the tray icon to show the window again, or choose Quit. "
+            "Requires a tray supported by your desktop."), appearanceGroup);
+        trayHint->setWordWrap(true);
+        appearanceLayout->addWidget(trayHint);
+        layout->addWidget(appearanceGroup);
+
+        auto* startupGroup = new QGroupBox(tr("At desktop login"), &dialog);
+        auto* startupLayout = new QVBoxLayout(startupGroup);
+        auto* login = new QCheckBox(tr("Launch VST Host when I log in"), startupGroup);
+        login->setChecked(settings.value(
+            QStringLiteral("autostart/enabled"), false).toBool());
+        startupLayout->addWidget(login);
 
         auto* form = new QFormLayout();
-        auto* selected = new QComboBox(&dialog);
+        auto* selected = new QComboBox(startupGroup);
         selected->addItem(tr("No saved profile"), QString());
         for (const auto& profile : storedProfiles())
             selected->addItem(profile.name, profile.id);
@@ -1913,29 +2087,40 @@ private:
         const auto index = selected->findData(preferred);
         selected->setCurrentIndex(index >= 0 ? index : 0);
         form->addRow(tr("Login profile"), selected);
-        layout->addLayout(form);
+        startupLayout->addLayout(form);
 
         auto* autoAudio = new QCheckBox(
-            tr("Start the virtual microphone automatically at login"), &dialog);
+            tr("Start the virtual microphone automatically"), startupGroup);
         autoAudio->setChecked(settings.value(
             QStringLiteral("autostart/startAudio"), false).toBool());
-        layout->addWidget(autoAudio);
-        const auto updateEnabled = [login, selected, autoAudio] {
+        startupLayout->addWidget(autoAudio);
+        auto* startHidden = new QCheckBox(
+            tr("Start hidden in the system tray"), startupGroup);
+        startHidden->setObjectName(QStringLiteral("startHiddenAtLoginPreference"));
+        startHidden->setChecked(settings.value(
+            QStringLiteral("autostart/startHidden"), false).toBool());
+        startupLayout->addWidget(startHidden);
+        layout->addWidget(startupGroup);
+
+        const auto updateEnabled = [login, selected, autoAudio, useTray, startHidden] {
             selected->setEnabled(login->isChecked());
             autoAudio->setEnabled(login->isChecked() &&
                                   !selected->currentData().toString().isEmpty());
             if (!autoAudio->isEnabled()) autoAudio->setChecked(false);
+            startHidden->setEnabled(login->isChecked() && useTray->isChecked());
+            if (!startHidden->isEnabled()) startHidden->setChecked(false);
         };
         connect(login, &QCheckBox::toggled, &dialog, updateEnabled);
         connect(selected, &QComboBox::currentIndexChanged, &dialog, updateEnabled);
+        connect(useTray, &QCheckBox::toggled, &dialog, updateEnabled);
         updateEnabled();
 
         auto* explanation = new QLabel(
-            tr("Autostart is off by default. Only a login launch uses these "
-               "settings; opening the app normally will not start audio. "
-               "Choose a saved profile for automatic audio startup. "
-               "For a stable launcher path, install the app in your user "
-               "directory first."), &dialog);
+            tr("Login autostart is optional. A normal launch always opens "
+               "the GUI and does not start audio automatically. If your "
+               "desktop has no tray support, a requested hidden login launch "
+               "opens the window instead. Install into your user directory "
+               "first to give the login launcher a stable path."), &dialog);
         explanation->setWordWrap(true);
         layout->addWidget(explanation);
         auto* buttons = new QDialogButtonBox(
@@ -1951,11 +2136,15 @@ private:
                 QMessageBox::critical(&dialog, tr("Autostart could not be updated"), error);
                 return;
             }
+            settings.setValue(QStringLiteral("ui/showTrayIcon"), useTray->isChecked());
             settings.setValue(QStringLiteral("autostart/enabled"), login->isChecked());
             settings.setValue(QStringLiteral("autostart/profileId"),
                               selected->currentData().toString());
             settings.setValue(QStringLiteral("autostart/startAudio"),
                               login->isChecked() && autoAudio->isChecked());
+            settings.setValue(QStringLiteral("autostart/startHidden"),
+                              login->isChecked() && useTray->isChecked() &&
+                              startHidden->isChecked());
             settings.sync();
             if (settings.status() != QSettings::NoError) {
                 QMessageBox::warning(&dialog, tr("Preferences could not be saved"),
@@ -1963,6 +2152,7 @@ private:
                                         "preferences could not be persisted."));
                 return;
             }
+            configureTrayIcon(useTray->isChecked());
             dialog.accept();
         });
         dialog.exec();
@@ -2405,6 +2595,14 @@ private:
                 summary += QStringLiteral("\n") + QString::fromStdString(result.warning);
             status_->setText(summary);
         }
+        // A tray host disappearing mid-session must never strand a hidden
+        // GUI. Restore the main window and normal close behavior.
+        if (trayEnabled_ && trayIcon_ && !QSystemTrayIcon::isSystemTrayAvailable()) {
+            QApplication::setQuitOnLastWindowClosed(true);
+            if (!isVisible()) showMainWindow();
+        } else if (trayAvailable()) {
+            QApplication::setQuitOnLastWindowClosed(false);
+        }
         if (autostartStartPending_ && !engine_ &&
             !pluginScanPending_ && !deviceScanPending_) {
             autostartStartPending_ = false;
@@ -2544,6 +2742,13 @@ private:
     QString activeProfileId_;
     bool startedAtLogin_{false};
     bool autostartStartPending_{false};
+    bool trayEnabled_{false};
+    bool quitting_{false};
+    QSystemTrayIcon* trayIcon_{};
+    QMenu* trayMenu_{};
+    QAction* trayShowHideAction_{};
+    QAction* hideToTrayAction_{};
+    QToolButton* diagnosticsToggle_{};
     QPushButton* clearSavedStateButton_{};
     QPushButton* removePluginButton_{};
     QPushButton* moveUpButton_{};
@@ -2647,12 +2852,41 @@ int main(int argc, char** argv) {
             QStringLiteral("profileSelector"));
         auto* menuButton = check.findChild<QToolButton*>(
             QStringLiteral("appMenuButton"));
+        auto* diagnostics = check.findChild<QToolButton*>(
+            QStringLiteral("diagnosticsToggle"));
+        auto* profileBar = check.findChild<QWidget*>(
+            QStringLiteral("profileToolbar"));
+        QAction* preferences = nullptr;
+        if (menuButton && menuButton->menu()) {
+            for (auto* action : menuButton->menu()->actions()) {
+                if (action->text() == QObject::tr("Preferences…"))
+                    preferences = action;
+            }
+        }
         if (!selector || selector->count() < 1 || !menuButton ||
-            !menuButton->menu() || menuButton->menu()->actions().size() < 9) {
-            std::fprintf(stderr, "Profile/settings menu smoke test failed.\n");
+            !menuButton->menu() || menuButton->menu()->actions().size() < 11 ||
+            !profileBar || !diagnostics || !diagnostics->isCheckable() ||
+            !preferences) {
+            std::fprintf(stderr, "Profile/tray/settings menu smoke test failed.\n");
             return 2;
         }
-        std::puts("Profile selector and application menu created successfully.");
+        bool sawTrayPreferences = false;
+        QTimer::singleShot(0, &check, [&] {
+            if (auto* dialog = check.findChild<QDialog*>()) {
+                const auto* tray = dialog->findChild<QCheckBox*>(
+                    QStringLiteral("showTrayPreference"));
+                const auto* hidden = dialog->findChild<QCheckBox*>(
+                    QStringLiteral("startHiddenAtLoginPreference"));
+                sawTrayPreferences = tray && hidden;
+                dialog->reject();
+            }
+        });
+        preferences->trigger();
+        if (!sawTrayPreferences) {
+            std::fprintf(stderr, "Tray/hidden-login preferences smoke test failed.\n");
+            return 2;
+        }
+        std::puts("Compact workspace, app menu and tray preferences are accessible.");
         return 0;
     }
     const bool launchedAtLogin =
@@ -2665,6 +2899,6 @@ int main(int argc, char** argv) {
             return 0;
     }
     MainWindow window(launchedAtLogin);
-    window.show();
+    if (!window.shouldBeginHiddenAtLogin()) window.show();
     return app.exec();
 }

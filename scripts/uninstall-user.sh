@@ -77,10 +77,15 @@ fi
 # Remove only the entry that targets this installed binary, not other users'
 # or applications' login entries.
 if [[ -f "$autostart_entry" && ! -L "$autostart_entry" ]] &&
-   grep -Fxq 'X-VSTHostExperiment-Managed=true' "$autostart_entry" &&
-   grep -Fxq "$expected_exec --autostart" "$autostart_entry"; then
-    rm -f -- "$autostart_entry"
-    echo "Removed VST Host login autostart entry."
+   grep -Fxq 'X-VSTHostExperiment-Managed=true' "$autostart_entry"; then
+    # Plain uninstall only cleans the login entry for this prefix.
+    # Explicit configuration removal also cleans managed entries pointing
+    # to an older build or installation path.
+    if grep -Fxq "$expected_exec --autostart" "$autostart_entry" ||
+       "$remove_config"; then
+        rm -f -- "$autostart_entry"
+        echo "Removed VST Host login autostart entry."
+    fi
 fi
 
 if "$remove_config"; then

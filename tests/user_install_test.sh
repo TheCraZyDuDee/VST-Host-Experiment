@@ -91,7 +91,15 @@ test -f "$XDG_CONFIG_HOME/autostart/other-software.desktop"
 
 # The explicit purge flag is the only path that removes app-specific config.
 bash "$root/scripts/install-user.sh" --build-dir "$build_dir" --prefix "$prefix"
+# When removing config explicitly, also clear a managed login entry left by
+# an earlier executable path. It is still this application's own entry.
+{
+    printf '[Desktop Entry]\n'
+    printf 'Exec="/older/installation/vst-host-gui" --autostart\n'
+    printf 'X-VSTHostExperiment-Managed=true\n'
+} > "$XDG_CONFIG_HOME/autostart/vst-host-experiment.desktop"
 bash "$root/scripts/uninstall-user.sh" --prefix "$prefix" --remove-config
+test ! -e "$XDG_CONFIG_HOME/autostart/vst-host-experiment.desktop"
 test ! -e "$qt_config"
 test ! -e "$uuid_profile"
 test -f "$XDG_CONFIG_HOME/VSTHostExperiment/other-file.txt"

@@ -42,20 +42,9 @@ jobs:
         run: cmake --build build-gui --parallel 2
       - name: Test profile persistence and XDG login autostart
         run: ctest --test-dir build-gui --output-on-failure -R '^profile-management-test$'
-      - name: Verify per-user installation and desktop launcher
+      - name: Verify copy-only install and selective uninstall
         shell: bash
-        run: |
-          set -euo pipefail
-          bash scripts/install-user.sh --no-build --build-dir build-gui --prefix "$RUNNER_TEMP/vst-host-user"
-          test -x "$RUNNER_TEMP/vst-host-user/bin/vst-host-gui"
-          test -x "$RUNNER_TEMP/vst-host-user/bin/vst-host"
-          launcher="$RUNNER_TEMP/vst-host-user/share/applications/vst-host-experiment.desktop"
-          test -f "$launcher"
-          grep -Fq 'X-VSTHostExperiment-Managed=true' "$launcher"
-          grep -Fq 'Exec="' "$launcher"
-          bash scripts/install-user.sh --uninstall --prefix "$RUNNER_TEMP/vst-host-user"
-          test ! -e "$launcher"
-          test ! -e "$RUNNER_TEMP/vst-host-user/bin/vst-host-gui"
+        run: bash tests/user_install_test.sh "$PWD/build-gui"
       - name: Configure GUI without X11 development libraries
         run: |
           cmake -S . -B build-wayland-no-x11 -DCMAKE_BUILD_TYPE=Release \

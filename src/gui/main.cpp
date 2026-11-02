@@ -2051,14 +2051,34 @@ private:
                            QStringLiteral("VSTHostExperiment"));
         QDialog dialog(this);
         dialog.setWindowTitle(tr("Preferences"));
-        dialog.resize(470, 250);
+        dialog.resize(500, 380);
         auto* layout = new QVBoxLayout(&dialog);
-        auto* login = new QCheckBox(tr("Launch VST Host when I log in"), &dialog);
-        login->setChecked(settings.value(QStringLiteral("autostart/enabled"), false).toBool());
-        layout->addWidget(login);
+        layout->setSpacing(10);
+
+        auto* appearanceGroup = new QGroupBox(tr("Window and tray"), &dialog);
+        auto* appearanceLayout = new QVBoxLayout(appearanceGroup);
+        auto* useTray = new QCheckBox(tr("Show a system tray icon"), appearanceGroup);
+        useTray->setObjectName(QStringLiteral("showTrayPreference"));
+        useTray->setChecked(settings.value(
+            QStringLiteral("ui/showTrayIcon"), false).toBool());
+        appearanceLayout->addWidget(useTray);
+        auto* trayHint = new QLabel(tr(
+            "When enabled, closing the window hides it without stopping audio. "
+            "Use the tray icon to show the window again, or choose Quit. "
+            "Requires a tray supported by your desktop."), appearanceGroup);
+        trayHint->setWordWrap(true);
+        appearanceLayout->addWidget(trayHint);
+        layout->addWidget(appearanceGroup);
+
+        auto* startupGroup = new QGroupBox(tr("At desktop login"), &dialog);
+        auto* startupLayout = new QVBoxLayout(startupGroup);
+        auto* login = new QCheckBox(tr("Launch VST Host when I log in"), startupGroup);
+        login->setChecked(settings.value(
+            QStringLiteral("autostart/enabled"), false).toBool());
+        startupLayout->addWidget(login);
 
         auto* form = new QFormLayout();
-        auto* selected = new QComboBox(&dialog);
+        auto* selected = new QComboBox(startupGroup);
         selected->addItem(tr("No saved profile"), QString());
         for (const auto& profile : storedProfiles())
             selected->addItem(profile.name, profile.id);
@@ -2067,29 +2087,40 @@ private:
         const auto index = selected->findData(preferred);
         selected->setCurrentIndex(index >= 0 ? index : 0);
         form->addRow(tr("Login profile"), selected);
-        layout->addLayout(form);
+        startupLayout->addLayout(form);
 
         auto* autoAudio = new QCheckBox(
-            tr("Start the virtual microphone automatically at login"), &dialog);
+            tr("Start the virtual microphone automatically"), startupGroup);
         autoAudio->setChecked(settings.value(
             QStringLiteral("autostart/startAudio"), false).toBool());
-        layout->addWidget(autoAudio);
-        const auto updateEnabled = [login, selected, autoAudio] {
+        startupLayout->addWidget(autoAudio);
+        auto* startHidden = new QCheckBox(
+            tr("Start hidden in the system tray"), startupGroup);
+        startHidden->setObjectName(QStringLiteral("startHiddenAtLoginPreference"));
+        startHidden->setChecked(settings.value(
+            QStringLiteral("autostart/startHidden"), false).toBool());
+        startupLayout->addWidget(startHidden);
+        layout->addWidget(startupGroup);
+
+        const auto updateEnabled = [login, selected, autoAudio, useTray, startHidden] {
             selected->setEnabled(login->isChecked());
             autoAudio->setEnabled(login->isChecked() &&
                                   !selected->currentData().toString().isEmpty());
             if (!autoAudio->isEnabled()) autoAudio->setChecked(false);
+            startHidden->setEnabled(login->isChecked() && useTray->isChecked());
+            if (!startHidden->isEnabled()) startHidden->setChecked(false);
         };
         connect(login, &QCheckBox::toggled, &dialog, updateEnabled);
         connect(selected, &QComboBox::currentIndexChanged, &dialog, updateEnabled);
+        connect(useTray, &QCheckBox::toggled, &dialog, updateEnabled);
         updateEnabled();
 
         auto* explanation = new QLabel(
-            tr("Autostart is off by default. Only a login launch uses these "
-               "settings; opening the app normally will not start audio. "
-               "Choose a saved profile for automatic audio startup. "
-               "For a stable launcher path, install the app in your user "
-               "directory first."), &dialog);
+            tr("Login autostart is optional. A normal launch always opens "
+               "the GUI and does not start audio automatically. If your "
+               "desktop has no tray support, a requested hidden login launch "
+               "opens the window instead. Install into your user directory "
+               "first to give the login launcher a stable path."), &dialog);
         explanation->setWordWrap(true);
         layout->addWidget(explanation);
         auto* buttons = new QDialogButtonBox(
@@ -2105,11 +2136,15 @@ private:
                 QMessageBox::critical(&dialog, tr("Autostart could not be updated"), error);
                 return;
             }
+            settings.setValue(QStringLiteral("ui/showTrayIcon"), useTray->isChecked());
             settings.setValue(QStringLiteral("autostart/enabled"), login->isChecked());
             settings.setValue(QStringLiteral("autostart/profileId"),
                               selected->currentData().toString());
             settings.setValue(QStringLiteral("autostart/startAudio"),
                               login->isChecked() && autoAudio->isChecked());
+            settings.setValue(QStringLiteral("autostart/startHidden"),
+                              login->isChecked() && useTray->isChecked() &&
+                              startHidden->isChecked());
             settings.sync();
             if (settings.status() != QSettings::NoError) {
                 QMessageBox::warning(&dialog, tr("Preferences could not be saved"),
@@ -2117,6 +2152,7 @@ private:
                                         "preferences could not be persisted."));
                 return;
             }
+            configureTrayIcon(useTray->isChecked());
             dialog.accept();
         });
         dialog.exec();

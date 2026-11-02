@@ -16,15 +16,7 @@ sudo apt install build-essential cmake pkg-config libpipewire-0.3-dev qt6-base-d
 sudo apt install libx11-dev
 ```
 
-**Install for your user (recommended):**
-
-```sh
-bash scripts/install-user.sh
-```
-
-This builds (or reuses your configured build) and installs the CLI, GUI, and application-menu launcher under `~/.local` without `sudo`. Run `bash scripts/install-user.sh --uninstall` to remove installed files; saved settings and profiles are preserved. To install from an already compiled build, use `--no-build` (or `--build-dir DIR` for an alternate build folder). See [Getting started](docs/getting-started.md).
-
-**Or build and run directly from the repository:**
+**Compile the program first:**
 
 ```sh
 cmake -S . -B build -DVST_HOST_ENABLE_VST3=ON -DVST_HOST_BUILD_GUI=ON
@@ -34,6 +26,23 @@ QT_QPA_PLATFORM=wayland ./build/vst-host-gui
 # Optional: use X11/XWayland for embedded plug-in vendor editors
 QT_QPA_PLATFORM=xcb ./build/vst-host-gui
 ```
+
+**Install the already-compiled program for your user:**
+
+```sh
+bash scripts/install-user.sh
+```
+
+The install script **only copies the compiled** `vst-host-gui` and `vst-host` executables to `~/.local/bin` and creates the application-menu entry in `~/.local/share/applications`. It never compiles, configures, downloads, or installs dependencies, and needs no `sudo`. If you compiled in another directory, use `--build-dir build-gui`.
+
+**Uninstall with a separate script:**
+
+```sh
+bash scripts/uninstall-user.sh                 # Keep saved profiles/settings
+bash scripts/uninstall-user.sh --remove-config # Also delete app-owned configuration
+```
+
+The optional configuration removal is limited to this program's Qt settings and UUID-named saved profiles in its XDG configuration directory. It does **not** remove plug-ins, Wine bridges, exported profiles stored elsewhere, or unrelated files. See [Getting started](docs/getting-started.md) for exact paths.
 
 The first build fetches the pinned Steinberg VST3 SDK unless `-DVST3_SDK_ROOT=/path/to/vst3sdk` is provided. The Qt GUI runs natively under Wayland, including standard plugin parameter controls. With X11/XWayland available, compatible third-party XEmbed editors open in a separate window while the Qt host stays on native Wayland. The editor dialog's **Plugin UI** tab provides a button to bring that companion window forward. Running under Qt xcb still embeds those editors inside the dialog.
 

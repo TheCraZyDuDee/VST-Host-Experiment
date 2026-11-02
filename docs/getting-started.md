@@ -18,22 +18,6 @@ sudo apt install libx11-dev
 
 Check `cmake --version`: the distribution's CMake may be too old for VST3.
 
-## Install for the current user
-
-From the repository root:
-
-```sh
-bash scripts/install-user.sh
-```
-
-This uses the existing CMake build or configures a new GUI/VST3 build, compiles with two jobs, and installs `vst-host-gui` and `vst-host` into `~/.local/bin`. A `~/.local/share/applications/vst-host-experiment.desktop` entry makes the app available in desktop menus under Wayland and X11. No root access or `sudo` is needed. The launcher does not force Qt to use either display protocol.
-
-Use `bash scripts/install-user.sh --no-build` if the current `build/` directory already contains both executables, `--build-dir build-gui` for an alternate directory, or `--prefix /absolute/path` to install elsewhere. The installer does not bundle Wine, bridges, Steinberg VST2 SDK files, PipeWire, Qt or runtime dependencies. To remove the installed binaries and launcher while preserving profiles/preferences:
-
-```sh
-bash scripts/install-user.sh --uninstall
-```
-
 ## Build and run
 
 **GUI + VST3 (recommended):**
@@ -72,6 +56,46 @@ Run automated tests:
 ```sh
 ctest --test-dir build --output-on-failure
 ```
+
+## Install already-built executables (no sudo)
+
+**First compile the program**, using the GUI + VST3 build instructions above. The installer will not configure or compile anything.
+
+From the repository root, after your `build/` directory contains both executables:
+
+```sh
+bash scripts/install-user.sh
+```
+
+This script copies only the following program files into your user installation:
+
+| File | Destination |
+| --- | --- |
+| Compiled GUI executable | `~/.local/bin/vst-host-gui` |
+| Compiled headless executable | `~/.local/bin/vst-host` |
+| Desktop application-menu entry | `~/.local/share/applications/vst-host-experiment.desktop` |
+
+The launcher uses the installed executable's absolute path and lets Qt select Wayland or X11 normally. No `sudo`, package manager, compilation, CMake installation step or extra dependency installation is performed. Qt, PipeWire, Wine and third-party plugin dependencies still need to be available on the user's system.
+
+For a different build directory, run `bash scripts/install-user.sh --build-dir build-gui`; for an alternative absolute user prefix, add `--prefix /your/absolute/path` to installation **and uninstallation**. The script refuses to overwrite unrelated desktop entries or unowned binaries.
+
+### Uninstall the program
+
+Use the **separate** uninstaller:
+
+```sh
+bash scripts/uninstall-user.sh
+```
+
+This removes the managed binaries and application-menu launcher plus a matching login-autostart entry, but **preserves your saved profiles and settings** by default.
+
+To explicitly delete application configuration as well:
+
+```sh
+bash scripts/uninstall-user.sh --remove-config
+```
+
+The optional flag deletes only the app-specific Qt settings file (`$XDG_CONFIG_HOME/VSTHostExperiment/VSTHostExperiment.conf`, normally under `~/.config`) and UUID-named saved profiles under `$XDG_CONFIG_HOME/vst-host-experiment/profiles/`. It preserves unrelated files even in those directories, exported `.vsthost` files elsewhere, your plugin bundles and Wine bridge installations. The scripts never recursively erase `~/.config` or other shared user directories. An unrecognised desktop launcher cannot authorize removal of existing binaries.
 
 ## GUI workflow
 

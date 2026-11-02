@@ -25,6 +25,13 @@ cmake --build build --target vst2-processor-test --parallel 1 --verbose
 - If the **nonfinite samples zeroed** counters increase, the input or an effect is returning NaN/Inf audio values. Try an empty chain, then add effects one at a time; avoid using plugins that repeatedly produce nonfinite output. The sanitization protects downstream audio but cannot prevent a faulty plugin from crashing its own process.
 - If output drops out, increase the latency buffer from 128 to 256/512/1024 frames and watch the GUI's dropped/underrun/stale frame counters. **Input** peak/RMS indicates the selected microphone before effects; **Output** indicates the virtual microphone after processing and gain. If input moves but output is silent, bypass effects one by one to identify the stage. **CLIP** indicates a channel reached or exceeded 0 dBFS; reduce the relevant input/plugin gain. Meters display silence if capture stops for several polls and do not measure end-to-end latency. The GUI's **Host CPU** figure is CPU time of this process, not the combined usage of external Wine bridge processes. The active-effect reported latency is a plug-in declaration, not a measured end-to-end hardware/PipeWire delay. PipeWire controls actual graph latency; the setting is a request, not a guarantee.
 
+## System tray icon or hidden startup is not working
+
+- Enable **⋮ → Preferences… → Show a system tray icon**. Right-click the icon for **Show window**, **Preferences**, or **Quit**. Closing the main window hides it only while the desktop reports a usable tray; otherwise closing exits normally.
+- Some Linux desktops, especially GNOME Shell without a tray extension, do not provide a StatusNotifierItem system tray. The application cannot force a tray icon to appear. On these desktops, **Start hidden in the system tray** safely falls back to showing the window. Check desktop tray/appindicator support rather than assuming Wayland itself is broken.
+- To start hidden on login, enable login launch, **Show a system tray icon**, and **Start hidden in the system tray**. Automatic microphone startup is a separate preference and still requires a valid saved profile.
+- If your tray disappears while the app is hidden, the main window should reappear automatically instead of leaving the process inaccessible. Use the ⋮ menu's **Quit** action if you want a full shutdown with a working tray.
+
 ## Saved profiles or login autostart do not work
 
 - Save an explicit profile using **Save profile** after stopping audio; the last working Qt workspace and a named preset are separate. The profile dropdown only switches while audio is stopped.

@@ -174,6 +174,11 @@ if(BUILD_TESTING)
 
     add_test(NAME ring-buffer-test COMMAND ring-buffer-test)
 
+    add_executable(tray-policy-test tests/tray_policy_test.cpp)
+    target_include_directories(tray-policy-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    target_compile_features(tray-policy-test PRIVATE cxx_std_20)
+    add_test(NAME tray-policy-test COMMAND tray-policy-test)
+
     # Validate capture byte ranges without requiring a PipeWire server.
     add_executable(buffer-bounds-test tests/buffer_bounds_test.cpp)
     target_include_directories(buffer-bounds-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -280,7 +285,7 @@ if(BUILD_TESTING)
     # many existing tests use assert() for both setup and verification.
     if(NOT MSVC)
         foreach(test_target IN ITEMS
-                ring-buffer-test buffer-bounds-test stereo-level-meter-test nonfinite-sanitizer-test process-cpu-meter-test capture-target-policy-test plugin-state-test parameter-event-queue-test audio-processor-test config-test
+                ring-buffer-test tray-policy-test buffer-bounds-test stereo-level-meter-test nonfinite-sanitizer-test process-cpu-meter-test capture-target-policy-test plugin-state-test parameter-event-queue-test audio-processor-test config-test
                 headless-config-parity-test plugin-discovery-test windows-bridge-manager-test processor-chain-test
                 windows-plugin-scope-test vst2-audio-layout-test vst2-legacy-abi-compat-test vst2-processor-test vst3-processor-test)
             target_compile_options(${test_target} PRIVATE -UNDEBUG)

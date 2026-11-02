@@ -29,6 +29,13 @@ export PATH="$test_root/tools:$PATH"
 bash -n "$root/scripts/install-user.sh"
 bash -n "$root/scripts/uninstall-user.sh"
 
+# A missing compiled build must fail without creating an installation.
+if bash "$root/scripts/install-user.sh" \
+        --build-dir "$test_root/not-built" --prefix "$test_root/not-installed"; then
+    echo "Installer unexpectedly accepted missing compiled binaries" >&2; exit 1
+fi
+test ! -e "$test_root/not-installed"
+
 # Existing unowned executable or desktop files cannot be overwritten.
 mkdir -p "$prefix/bin" "$prefix/share/applications"
 printf 'user file\n' > "$prefix/bin/vst-host"

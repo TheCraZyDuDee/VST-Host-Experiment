@@ -2852,12 +2852,41 @@ int main(int argc, char** argv) {
             QStringLiteral("profileSelector"));
         auto* menuButton = check.findChild<QToolButton*>(
             QStringLiteral("appMenuButton"));
+        auto* diagnostics = check.findChild<QToolButton*>(
+            QStringLiteral("diagnosticsToggle"));
+        auto* profileBar = check.findChild<QWidget*>(
+            QStringLiteral("profileToolbar"));
+        QAction* preferences = nullptr;
+        if (menuButton && menuButton->menu()) {
+            for (auto* action : menuButton->menu()->actions()) {
+                if (action->text() == QObject::tr("Preferences…"))
+                    preferences = action;
+            }
+        }
         if (!selector || selector->count() < 1 || !menuButton ||
-            !menuButton->menu() || menuButton->menu()->actions().size() < 9) {
-            std::fprintf(stderr, "Profile/settings menu smoke test failed.\n");
+            !menuButton->menu() || menuButton->menu()->actions().size() < 11 ||
+            !profileBar || !diagnostics || !diagnostics->isCheckable() ||
+            !preferences) {
+            std::fprintf(stderr, "Profile/tray/settings menu smoke test failed.\n");
             return 2;
         }
-        std::puts("Profile selector and application menu created successfully.");
+        bool sawTrayPreferences = false;
+        QTimer::singleShot(0, &check, [&] {
+            if (auto* dialog = check.findChild<QDialog*>()) {
+                const auto* tray = dialog->findChild<QCheckBox*>(
+                    QStringLiteral("showTrayPreference"));
+                const auto* hidden = dialog->findChild<QCheckBox*>(
+                    QStringLiteral("startHiddenAtLoginPreference"));
+                sawTrayPreferences = tray && hidden;
+                dialog->reject();
+            }
+        });
+        preferences->trigger();
+        if (!sawTrayPreferences) {
+            std::fprintf(stderr, "Tray/hidden-login preferences smoke test failed.\n");
+            return 2;
+        }
+        std::puts("Compact workspace, app menu and tray preferences are accessible.");
         return 0;
     }
     const bool launchedAtLogin =

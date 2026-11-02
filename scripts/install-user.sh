@@ -59,75 +59,7 @@ escape_exec_arg() {
     value=${value//\\/\\\\}
     value=${value//\"/\\\"}
     value=${value//\$/\\\$}
-    local tick=
-    value=${value//%/%%}
-    printf '"%s"' "$value"
-}
-
-bin_dir="$prefix/bin"
-desktop_dir="$prefix/share/applications"
-desktop_entry="$desktop_dir/vst-host-experiment.desktop"
-gui_binary="$bin_dir/vst-host-gui"
-expected_exec="Exec=$(escape_exec_arg "$gui_binary")"
-
-# Never replace an existing application or launcher that this installer did
-# not create. This also protects manually installed unrelated executables.
-managed=false
-if [[ -e "$desktop_entry" || -L "$desktop_entry" ]]; then
-    if [[ -L "$desktop_entry" || ! -f "$desktop_entry" ]] ||
-       ! grep -Fxq 'X-VSTHostExperiment-Managed=true' "$desktop_entry" ||
-       ! grep -Fxq "$expected_exec" "$desktop_entry"; then
-        echo "Refusing to replace an unrelated desktop entry: $desktop_entry" >&2
-        exit 1
-    fi
-    managed=true
-fi
-if [[ "$managed" == false ]] &&
-   { [[ -e "$gui_binary" || -L "$gui_binary" ]] ||
-     [[ -e "$bin_dir/vst-host" || -L "$bin_dir/vst-host" ]]; }; then
-    echo "Refusing to overwrite existing executables without our launcher in $bin_dir." >&2
-    exit 1
-fi
-if [[ -L "$gui_binary" || -L "$bin_dir/vst-host" ]]; then
-    echo "Refusing to replace symlinked executable paths." >&2
-    exit 1
-fi
-
-mkdir -p -- "$bin_dir" "$desktop_dir"
-
-# Stage each new file in its destination directory, then replace atomically.
-# Existing running executables are not overwritten in place.
-tmp_gui=$(mktemp "$bin_dir/.vst-host-gui.XXXXXX")
-tmp_cli=$(mktemp "$bin_dir/.vst-host.XXXXXX")
-tmp_desktop=$(mktemp "$desktop_dir/.vst-host-experiment.XXXXXX")
-trap 'rm -f -- "$tmp_gui" "$tmp_cli" "$tmp_desktop"' EXIT
-install -m 755 -- "$build_dir/vst-host-gui" "$tmp_gui"
-install -m 755 -- "$build_dir/vst-host" "$tmp_cli"
-cat > "$tmp_desktop" <<DESKTOP
-[Desktop Entry]
-Type=Application
-Name=VST Host Experiment
-GenericName=Virtual microphone effects host
-Comment=Apply VST effects to a PipeWire microphone
-$expected_exec
-Icon=audio-input-microphone
-Terminal=false
-Categories=AudioVideo;Audio;
-StartupNotify=true
-X-VSTHostExperiment-Managed=true
-DESKTOP
-chmod 644 "$tmp_desktop"
-mv -f -- "$tmp_gui" "$gui_binary"
-mv -f -- "$tmp_cli" "$bin_dir/vst-host"
-mv -f -- "$tmp_desktop" "$desktop_entry"
-trap - EXIT
-
-echo "Copied already-built VST Host files (no build performed):"
-echo "  $gui_binary"
-echo "  $bin_dir/vst-host"
-echo "  $desktop_entry"
-echo "Existing profiles and configuration were not changed."
-\x60'
+    local tick=$'\x60'
     value=${value//"$tick"/\\$tick}
     value=${value//%/%%}
     printf '"%s"' "$value"

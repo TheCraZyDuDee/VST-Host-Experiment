@@ -43,7 +43,7 @@ When the named source disappears or capture is inactive, the output stream stays
 | `src/audio/config.hpp` / `plugin_state.hpp` | Portable settings and bounded binary state encoding |
 | `src/gui/main.cpp` | Qt plugin browser, chain controls, device UI, native Qt Wayland/X11 host controls, optional X11 editor surface |
 
-The GUI scans devices and plugin directories off the UI thread. It retains an explicitly selected processing chain. The headless CLI restores that same chain from `--config`, without auto-loading other effects from saved library directories; `--plugin-dir` and `--windows-plugin-dir` explicitly opt in to additional automatic effects. Wine bridge synchronization for explicit Windows CLI directory scans runs before audio starts, outside audio callbacks.
+The GUI scans devices and plugin directories off the UI thread. It retains an explicitly selected processing chain. Named profiles reuse the portable `.vsthost` format and are stored under the user's XDG configuration directory with opaque UUID filenames; a small QSettings index tracks their labels. Login autostart uses a user-only XDG desktop entry with an explicit profile selection and starts audio only after device/plugin discovery completes. The application and audio engine do not require root privileges. The headless CLI restores that same chain from `--config`, without auto-loading other effects from saved library directories; `--plugin-dir` and `--windows-plugin-dir` explicitly opt in to additional automatic effects. Wine bridge synchronization for explicit Windows CLI directory scans runs before audio starts, outside audio callbacks.
 
 ## Parameters and state
 

@@ -47,11 +47,11 @@ See [Getting started](docs/getting-started.md) for full build options and the CL
 2. In the **Plugin library**, expand **Plugin folders and scanning** and use **Add Linux directory…** or **Add Windows directory…**, then **Scan all**. Collapse it again to make more room for effects. Alternatively, add an individual plugin bundle.
 3. Use the resizable, side-by-side **Plugin library** and **Processing chain** panels. Search with **Ctrl+F**, then double-click an available effect (or use **Add selected to chain**). Drag to reorder while stopped; each entry identifies its format, e.g. `(VST2)` or `(VST3) (WINE)`.
 4. Click **Start audio** and select the virtual microphone in Discord, OBS, or another app. Double-click an effect to edit it. **Bypass selected effect** works while audio runs.
-5. Click **Stop audio** to capture plugin settings. Use **Save configuration…** to export a portable `.vsthost` file.
+5. Click **Stop audio** to capture plugin settings. Use **Save profile** to store the current chain as a named preset; switch from the **Profile** dropdown. The **⋮** menu contains Save as, Rename, Delete, Import/Export `.vsthost`, **Preferences**, **Help**, and **About**. Preferences can optionally launch at desktop login with a chosen saved profile and start audio automatically.
 
 Selecting a specific microphone **pins that input**: if it disconnects, the virtual mic stays available but silent until the same PipeWire node returns. The **Default microphone** choice continues to follow the system default.
 
-Plugin settings, chain order, and host settings are retained between normal launches. Stop audio before saving a portable configuration to include the latest plugin state.
+Plugin settings, chain order, and host settings are retained between normal launches. Saved named profiles are separate `.vsthost` files under the user configuration directory (`~/.config/vst-host-experiment/profiles/` by default). Stop audio before saving a profile or portable configuration to include the latest plugin state. Autostart is off unless explicitly enabled in Preferences.
 
 ## Features and limits
 

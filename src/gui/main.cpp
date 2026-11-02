@@ -7,6 +7,7 @@
 #include "audio/vst3_processor.hpp"
 #include "gui/process_cpu_meter.hpp"
 #include "gui/profile_management.hpp"
+#include "gui/tray_policy.hpp"
 
 #include <QApplication>
 #include <QByteArray>
@@ -40,6 +41,11 @@
 #include <QAbstractItemView>
 #include <QAbstractItemModel>
 #include <QMainWindow>
+#include <QSystemTrayIcon>
+#include <QStyle>
+#include <QIcon>
+#include <QShowEvent>
+#include <QHideEvent>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QProgressBar>
@@ -966,8 +972,12 @@ public:
 
         // The fast path is a profile selector. Advanced actions live under
         // one menu, rather than occupying permanent space in the workspace.
-        auto* profileRow = new QHBoxLayout();
-        profileRow->addWidget(new QLabel(tr("Profile"), central));
+        auto* profileBar = new QWidget(central);
+        profileBar->setObjectName(QStringLiteral("profileToolbar"));
+        auto* profileRow = new QHBoxLayout(profileBar);
+        profileRow->setContentsMargins(2, 0, 2, 0);
+        profileRow->setSpacing(6);
+        profileRow->addWidget(new QLabel(tr("Profile"), profileBar));
         profileSelector_ = new QComboBox(central);
         profileSelector_->setObjectName(QStringLiteral("profileSelector"));
         profileSelector_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
@@ -975,13 +985,14 @@ public:
         profileSelector_->setToolTip(tr(
             "Switch between saved .vsthost profiles. Stop audio before switching."));
         profileRow->addWidget(profileSelector_, 1);
-        saveProfileButton_ = new QPushButton(tr("Save profile"), central);
+        saveProfileButton_ = new QPushButton(tr("Save"), profileBar);
         saveProfileButton_->setToolTip(tr(
             "Save the current chain, routing, and last captured plugin state. "
             "Stop audio first to capture a fresh state snapshot."));
         profileRow->addWidget(saveProfileButton_);
-        profileMenuButton_ = new QToolButton(central);
+        profileMenuButton_ = new QToolButton(profileBar);
         profileMenuButton_->setText(QStringLiteral("⋮"));
+        profileMenuButton_->setAutoRaise(true);
         profileMenuButton_->setObjectName(QStringLiteral("appMenuButton"));
         profileMenuButton_->setToolTip(tr("Profiles, preferences, help and about"));
         profileMenuButton_->setAccessibleName(tr("Application menu"));
@@ -1003,7 +1014,7 @@ public:
                                    [this] { showAbout(); });
         profileMenuButton_->setMenu(applicationMenu);
         profileRow->addWidget(profileMenuButton_);
-        root->insertLayout(0, profileRow);
+        root->insertWidget(0, profileBar);
         connect(profileSelector_, &QComboBox::activated, this,
                 [this](int index) { switchProfile(index); });
         connect(saveProfileButton_, &QPushButton::clicked, this,
@@ -1172,11 +1183,38 @@ public:
             "bridge processes. Effect latency is the sum reported by active "
             "plug-ins; it is not measured end-to-end PipeWire or device delay."));
         root->addWidget(performance_);
-        auto* note = new QLabel(
-            tr("Plugin-specific editors use X11/XWayland. On native Wayland, "
-               "the host's standard parameter controls remain available."), central);
-        note->setWordWrap(true);
-        root->addWidget(note);
+        // Keep the monitoring details available, but make them collapsible:
+        // the plugin library and chain should get most of the screen space.
+        auto* detailsToggle = new QToolButton(central);
+        detailsToggle->setObjectName(QStringLiteral("diagnosticsToggle"));
+        detailsToggle->setText(tr("Diagnostics"));
+        detailsToggle->setCheckable(true);
+        detailsToggle->setChecked(false);
+        detailsToggle->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        detailsToggle->setArrowType(Qt::RightArrow);
+        detailsToggle->setToolTip(tr("Show buffer health and host performance details"));
+        auto* detailsPanel = new QWidget(central);
+        auto* detailsLayout = new QVBoxLayout(detailsPanel);
+        detailsLayout->setContentsMargins(6, 0, 0, 0);
+        detailsLayout->setSpacing(3);
+        // Move existing diagnostic widgets into the collapsible panel.
+        root->removeWidget(diagnostics_);
+        root->removeWidget(performance_);
+        detailsLayout->addWidget(diagnostics_);
+        detailsLayout->addWidget(performance_);
+        detailsPanel->setVisible(false);
+        root->addWidget(detailsToggle);
+        root->addWidget(detailsPanel);
+        diagnosticsToggle_ = detailsToggle;
+        connect(detailsToggle, &QToolButton::toggled, this,
+                [this, detailsPanel](bool visible) {
+                    detailsPanel->setVisible(visible);
+                    diagnosticsToggle_->setArrowType(
+                        visible ? Qt::DownArrow : Qt::RightArrow);
+                    QSettings settings(QStringLiteral("VSTHostExperiment"),
+                                       QStringLiteral("VSTHostExperiment"));
+                    settings.setValue(QStringLiteral("ui/diagnosticsExpanded"), visible);
+                });
         auto* scrollArea = new QScrollArea(this);
         scrollArea->setWidgetResizable(true);
         scrollArea->setFrameShape(QFrame::NoFrame);

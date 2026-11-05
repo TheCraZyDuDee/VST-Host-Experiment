@@ -4,6 +4,13 @@ A Linux PipeWire host that processes a microphone through an ordered chain of **
 
 Supports native Linux plugins and Windows plugins through [vstbridge](https://github.com/rations/vstbridge) or [yabridge](https://github.com/robbert-vdh/yabridge) and Wine.
 
+### **REPOSITORY AND DOCUMENTATION IS STILL HEAVILY WORK-IN-PROGRESS**
+
+## AI Disclamer
+
+AI tools were used throughout this project for code development, debugging, documentation, and problem-solving.<br>
+If you disagree with the use of AI for development or don't trust the code you are free to skip over this Project.
+
 ## Quick start
 
 Requires a Linux desktop session with PipeWire, a C++20 compiler, CMake **3.25+** for VST3, Qt 6 Widgets, and `pkg-config` / PipeWire development headers. On Wayland install the Qt Wayland platform plugin; X11 development libraries are optional for legacy XEmbed editor windows.
